@@ -28,11 +28,6 @@ jobs:
           node-version: '20'
           cache: npm
 
-      - name: Configure EY npm registry
-        run: |
-          echo "@ey-xd:registry=https://eyctpeu.jfrog.io/artifactory/api/npm/ey-npm/" >> .npmrc
-          echo "//eyctpeu.jfrog.io/artifactory/api/npm/ey-npm/:_authToken=${{ secrets.NPM_TOKEN }}" >> .npmrc
-
       - name: Install dependencies
         run: npm install
 
