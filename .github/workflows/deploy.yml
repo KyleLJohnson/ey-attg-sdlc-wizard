@@ -34,7 +34,7 @@ jobs:
           echo "//eyctpeu.jfrog.io/artifactory/api/npm/ey-npm/:_authToken=${{ secrets.NPM_TOKEN }}" >> .npmrc
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Bundle sdd-kit files
         run: npm run bundle-kit
