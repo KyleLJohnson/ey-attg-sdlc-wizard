@@ -90,6 +90,24 @@ function walk(dir, result = {}) {
 
 // ── Generate ─────────────────────────────────────────────────────────────────
 const files = walk(KIT_ROOT);
+
+// ── Also bundle agentic workflow files from .github/workflows/ ───────────────
+// These are pushed to the target repo so the Greenfield Planning workflow
+// fires automatically when the SDLC issue is created.
+const WORKFLOWS_DIR    = join(PROJECT_ROOT, '.github', 'workflows');
+const WORKFLOW_EXCLUDE = new Set(['deploy.yml']);
+try {
+  for (const entry of readdirSync(WORKFLOWS_DIR)) {
+    if (WORKFLOW_EXCLUDE.has(entry)) continue;
+    const ext = extname(entry).toLowerCase();
+    if (ext === '.yml' || ext === '.md') {
+      try {
+        files[`.github/workflows/${entry}`] = readFileSync(join(WORKFLOWS_DIR, entry), 'utf8');
+      } catch { /* skip unreadable */ }
+    }
+  }
+} catch { /* skip if workflows dir is missing */ }
+
 mkdirSync(OUT_DIR, { recursive: true });
 writeFileSync(OUT_FILE, JSON.stringify(files, null, 2));
 
