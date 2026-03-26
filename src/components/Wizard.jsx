@@ -9,7 +9,7 @@ import {
   BrainResearch, InfoCircle, LightBulbOn, Accessibility, Page,
 } from 'iconoir-react';
 
-// â”€â”€â”€ Motif Icon Helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Motif Icon Helper ────────────────────────────────────────────────────────
 function MotifIcon({ icon: Icon, size = 20, style = {} }) {
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0, ...style }}>
@@ -18,9 +18,9 @@ function MotifIcon({ icon: Icon, size = 20, style = {} }) {
   );
 }
 
-// â”€â”€â”€ Step Metadata â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// 9 steps: Welcome(0) â†’ Project(1) â†’ TechStack(2) â†’ Governance(3) â†’ Principles(4)
-//          â†’ MCP(5) â†’ Agent(6) â†’ Preview(7) â†’ Publish(8)
+// ─── Step Metadata ────────────────────────────────────────────────────────────
+// 9 steps: Welcome(0) → Project(1) → TechStack(2) → Governance(3) → Principles(4)
+//          → MCP(5) → Agent(6) → Preview(7) → Publish(8)
 const STEPS = [
   { id: 'welcome',    label: 'Welcome',       icon: HomeSimple },
   { id: 'project',   label: 'Project',        icon: JournalPage },
@@ -33,7 +33,7 @@ const STEPS = [
   { id: 'publish',   label: 'Publish',        icon: Github },
 ];
 
-// â”€â”€â”€ Initial Form Data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Initial Form Data ────────────────────────────────────────────────────────
 const INITIAL = {
   project: {
     name: '', description: '', problemStatement: '',
@@ -63,7 +63,7 @@ const INITIAL = {
   agent: { primary: 'github-copilot', model: 'gpt-4o', secondary: [] },
 };
 
-// â”€â”€â”€ Main Wizard Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Main Wizard Component ────────────────────────────────────────────────────
 export default function Wizard() {
   const [step, setStep]           = useState(0);
   const [data, setData]           = useState(INITIAL);
@@ -115,7 +115,7 @@ export default function Wizard() {
 
   return (
     <div className="wizard-shell">
-      {/* â”€â”€ Sidebar â”€â”€ */}
+      {/* ── Sidebar ── */}
       <aside className="wizard-sidebar">
         <div className="wizard-sidebar-logo">
           <svg className="ey-logo-svg" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-label="EY logo">
@@ -139,14 +139,14 @@ export default function Wizard() {
               className={`wizard-step-item ${isActive ? 'active' : ''} ${isDone ? 'done' : ''} ${isClickable ? 'clickable' : ''}`}
               onClick={() => isClickable && setStep(i)}
             >
-              <div className="wizard-step-num">{isDone ? 'âœ“' : i + 1}</div>
+              <div className="wizard-step-num">{isDone ? '✓' : i + 1}</div>
               <span className="wizard-step-label">{s.label}</span>
             </button>
           );
         })}
       </aside>
 
-      {/* â”€â”€ Main Content â”€â”€ */}
+      {/* ── Main Content ── */}
       <main className="wizard-main">
         <div className="wizard-content">
           {step === 0 && <WelcomeStep />}
@@ -173,10 +173,10 @@ export default function Wizard() {
           )}
         </div>
 
-        {/* â”€â”€ Footer Navigation â”€â”€ */}
+        {/* ── Footer Navigation ── */}
         {step > 0 && (
           <div className="wizard-footer">
-            <button className="btn btn-secondary" onClick={goBack}>â† Back</button>
+            <button className="btn btn-secondary" onClick={goBack}>← Back</button>
             <div className="wizard-footer-right">
               <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                 Step {step} of {STEPS.length - 1}
@@ -188,9 +188,9 @@ export default function Wizard() {
                       <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true" style={{ marginRight: 4 }}>
                         <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z" />
                       </svg>
-                      Publish to GitHub â†’
+                      Publish to GitHub →
                     </>
-                  ) : step === STEPS.length - 3 ? 'âœ¦ Generate Files' : 'Next â†’'}
+                  ) : step === STEPS.length - 3 ? '✦ Generate Files' : 'Next →'}
                 </button>
               )}
             </div>
@@ -200,7 +200,7 @@ export default function Wizard() {
         {step === 0 && (
           <div style={{ marginTop: 24, textAlign: 'center' }}>
             <button className="btn btn-primary btn-large" onClick={goNext}>
-              Let's Get Started â†’
+              Let's Get Started →
             </button>
           </div>
         )}
@@ -209,7 +209,7 @@ export default function Wizard() {
   );
 }
 
-// â”€â”€â”€ Step 0: Welcome â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Step 0: Welcome ──────────────────────────────────────────────────────────
 function WelcomeStep() {
   return (
     <div className="welcome-hero">
@@ -220,8 +220,8 @@ function WelcomeStep() {
         <h1>EY ATTG SDLC<br />Setup Wizard</h1>
         <p className="subtitle">
           Answer a few questions about your project and we'll generate a
-          complete, plug-and-play kit â€” all sdd-kit prompts, instructions,
-          templates, and pre-filled context files â€” then push it directly
+          complete, plug-and-play kit — all sdd-kit prompts, instructions,
+          templates, and pre-filled context files — then push it directly
           to a new GitHub repository in one click.
         </p>
         <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
@@ -250,7 +250,7 @@ function WelcomeStep() {
   );
 }
 
-// â”€â”€â”€ Step 1: Project Identity â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Step 1: Project Identity ─────────────────────────────────────────────────
 function ProjectStep({ data, update, errors = {}, clearError = () => {} }) {
   const addPersona = () =>
     update({ personas: [...data.personas, { id: Date.now(), name: '', description: '', goals: '', painPoints: '' }] });
@@ -325,7 +325,7 @@ function ProjectStep({ data, update, errors = {}, clearError = () => {} }) {
 
       <div className="form-section">
         <div className="form-section-title">Feature Specs <span className="badge badge-optional">optional</span></div>
-        <p className="form-section-desc">Provide feature specifications to include â€” paste text, upload a file, or link an ADO work item.</p>
+        <p className="form-section-desc">Provide feature specifications to include — paste text, upload a file, or link an ADO work item.</p>
         <div className="spec-mode-tabs">
           {[['paste', 'Paste Text'], ['file', 'Upload File'], ['ado', 'ADO URL']].map(([mode, label]) => (
             <button key={mode} type="button"
@@ -377,19 +377,19 @@ function ProjectStep({ data, update, errors = {}, clearError = () => {} }) {
         <div className="form-group">
           <label htmlFor="proj-biz-constraints">Business <span className="label-hint">one per line</span></label>
           <textarea id="proj-biz-constraints" value={data.businessConstraints} onChange={e => update({ businessConstraints: e.target.value })}
-            placeholder="e.g., Must launch by Q3 2026&#10;Must comply with GDPR&#10;Budget: Â£200k" rows={3} />
+            placeholder="e.g., Must launch by Q3 2026&#10;Must comply with GDPR&#10;Budget: £200k" rows={3} />
         </div>
         <div className="form-group">
           <label htmlFor="proj-tech-constraints">Technical <span className="label-hint">one per line</span></label>
           <textarea id="proj-tech-constraints" value={data.technicalConstraints} onChange={e => update({ technicalConstraints: e.target.value })}
-            placeholder="e.g., Must integrate with existing SSO&#10;Azure only â€” no new cloud providers" rows={3} />
+            placeholder="e.g., Must integrate with existing SSO&#10;Azure only — no new cloud providers" rows={3} />
         </div>
       </div>
     </div>
   );
 }
 
-// â”€â”€â”€ Step 2: Tech Stack â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Step 2: Tech Stack ───────────────────────────────────────────────────────
 function TechStackStep({ data, update }) {
   const toggle = (field, val) => {
     const arr = data[field] || [];
@@ -405,7 +405,7 @@ function TechStackStep({ data, update }) {
     <div>
       <div className="step-header">
         <h1>Tech Stack</h1>
-        <p>Define the approved technologies. This fills in <code>context/tech-stack.md</code> â€” the AI agent references this before every code task.</p>
+        <p>Define the approved technologies. This fills in <code>context/tech-stack.md</code> — the AI agent references this before every code task.</p>
       </div>
 
       <div className="form-section">
@@ -426,7 +426,7 @@ function TechStackStep({ data, update }) {
           <div className="form-group">
             <label htmlFor="fe-select">Frontend Framework</label>
             <select id="fe-select" value={data.frontend} onChange={e => update({ frontend: e.target.value })}>
-              <option value="">â€” Select â€”</option>
+              <option value="">— Select —</option>
               <option value="React">React</option>
               <option value="Angular">Angular</option>
               <option value="none">None / Not applicable</option>
@@ -440,7 +440,7 @@ function TechStackStep({ data, update }) {
           <div className="form-group">
             <label htmlFor="be-select">Backend Framework</label>
             <select id="be-select" value={data.backend} onChange={e => update({ backend: e.target.value })}>
-              <option value="">â€” Select â€”</option>
+              <option value="">— Select —</option>
               <option value="Node.js">Node.js (JavaScript)</option>
               <option value="ASP.NET Core">.NET / ASP.NET Core</option>
               <option value="none">None / Serverless</option>
@@ -471,7 +471,7 @@ function TechStackStep({ data, update }) {
         <div className="form-group">
           <label htmlFor="source-control-select">Source Control System</label>
           <select id="source-control-select" value={data.sourceControl} onChange={e => update({ sourceControl: e.target.value })}>
-            <option value="">â€” Select â€”</option>
+            <option value="">— Select —</option>
             <option value="GitHub">GitHub</option>
             <option value="Azure Repos (Git)">ADO Git (Azure Repos)</option>
             <option value="JFrog Artifactory (Git)">JFrog Artifactory (Git)</option>
@@ -509,8 +509,8 @@ function TechStackStep({ data, update }) {
           <MotifIcon icon={Page} size="24" style={{ color: 'var(--ey-charcoal)', flexShrink: 0 }} />
           <div className="mcp-card-body">
             <div className="mcp-name">OpenAPI / Swagger Docs</div>
-            <div className="mcp-desc">Adds OpenAPI 3.1 documentation standards â€” framework setup, required annotations, response schema rules, and a pre-flight checklist for every backend route.</div>
-            <code className="mcp-tag">OAS 3.1 Â· Swagger UI Â· Swashbuckle Â· springdoc Â· swagger-jsdoc</code>
+            <div className="mcp-desc">Adds OpenAPI 3.1 documentation standards — framework setup, required annotations, response schema rules, and a pre-flight checklist for every backend route.</div>
+            <code className="mcp-tag">OAS 3.1 · Swagger UI · Swashbuckle · springdoc · swagger-jsdoc</code>
           </div>
         </button>
       </div>
@@ -522,8 +522,8 @@ function TechStackStep({ data, update }) {
           <MotifIcon icon={Accessibility} size="24" style={{ color: 'var(--ey-charcoal)', flexShrink: 0 }} />
           <div className="mcp-card-body">
             <div className="mcp-name">Accessibility (WCAG 2.2 AA)</div>
-            <div className="mcp-desc">Enforces WCAG 2.2 Level AA â€” semantic HTML, ARIA rules, keyboard navigation, focus management, colour contrast, and inclusive language.</div>
-            <code className="mcp-tag">WCAG 2.2 AA Â· ARIA Â· keyboard Â· screen reader</code>
+            <div className="mcp-desc">Enforces WCAG 2.2 Level AA — semantic HTML, ARIA rules, keyboard navigation, focus management, colour contrast, and inclusive language.</div>
+            <code className="mcp-tag">WCAG 2.2 AA · ARIA · keyboard · screen reader</code>
           </div>
         </button>
         <button type="button" className={`mcp-card ${data.useMotif ? 'selected' : ''}`}
@@ -531,8 +531,8 @@ function TechStackStep({ data, update }) {
           <MotifIcon icon={MultiplePages} size="24" style={{ color: 'var(--ey-charcoal)', flexShrink: 0 }} />
           <div className="mcp-card-body">
             <div className="mcp-name">Motif Design System</div>
-            <div className="mcp-desc">EY's enterprise Web Components library â€” React, Angular, and HTML. Adds Motif design tokens, component rules, and Figma workflow guidance.</div>
-            <code className="mcp-tag">@ey-xd/motif-components Â· @ey-xd/motif-wc-react</code>
+            <div className="mcp-desc">EY's enterprise Web Components library — React, Angular, and HTML. Adds Motif design tokens, component rules, and Figma workflow guidance.</div>
+            <code className="mcp-tag">@ey-xd/motif-components · @ey-xd/motif-wc-react</code>
           </div>
         </button>
       </div>
@@ -542,7 +542,7 @@ function TechStackStep({ data, update }) {
         <div className="form-group">
           <label htmlFor="db-select">Primary Database</label>
           <select id="db-select" value={data.database} onChange={e => update({ database: e.target.value })}>
-            <option value="">â€” Select â€”</option>
+            <option value="">— Select —</option>
             <option value="Azure PostgreSQL">PostgreSQL (Azure)</option>
             <option value="SQL Server">SQL Server</option>
             <option value="Azure CosmosDB">Azure CosmosDB</option>
@@ -579,7 +579,7 @@ function TechStackStep({ data, update }) {
   );
 }
 
-// â”€â”€â”€ Step 3: Governance â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Step 3: Governance ───────────────────────────────────────────────────────
 function GovernanceStep({ data, update, errors = {}, clearError = () => {} }) {
   const toggleLevel = (level) => {
     if (level === 'product' || level === 'enterprise') return;
@@ -590,10 +590,10 @@ function GovernanceStep({ data, update, errors = {}, clearError = () => {} }) {
   };
 
   const levels = [
-    { id: 'enterprise', label: 'L1 â€” Enterprise', desc: 'Org-wide rules set by CTO / Enterprise Architect.', badge: 'L1', disabled: true },
-    { id: 'bu',         label: 'L2 â€” Business Unit', desc: 'BU-level reference architectures. Generate with /sdd-blueprint.', badge: 'L2', field: 'buName', placeholder: 'e.g., ATTG, Tax, Assurance' },
-    { id: 'domain',     label: 'L3 â€” Domain', desc: 'Domain namespace and shared models. Generate with /sdd-domain-spec.', badge: 'L3', field: 'domainName', placeholder: 'e.g., ShareTrust, APM, CTP' },
-    { id: 'product',    label: 'L4 â€” Product', desc: 'Product-level principles (always applies). Generated by this wizard.', badge: 'L4', disabled: true },
+    { id: 'enterprise', label: 'L1 — Enterprise', desc: 'Org-wide rules set by CTO / Enterprise Architect.', badge: 'L1', disabled: true },
+    { id: 'bu',         label: 'L2 — Business Unit', desc: 'BU-level reference architectures. Generate with /sdd-blueprint.', badge: 'L2', field: 'buName', placeholder: 'e.g., ATTG, Tax, Assurance' },
+    { id: 'domain',     label: 'L3 — Domain', desc: 'Domain namespace and shared models. Generate with /sdd-domain-spec.', badge: 'L3', field: 'domainName', placeholder: 'e.g., ShareTrust, APM, CTP' },
+    { id: 'product',    label: 'L4 — Product', desc: 'Product-level principles (always applies). Generated by this wizard.', badge: 'L4', disabled: true },
   ];
 
   return (
@@ -625,7 +625,7 @@ function GovernanceStep({ data, update, errors = {}, clearError = () => {} }) {
                     {l.badge === 'L2' ? (
                       <select id={l.field} className={errors[l.field] ? 'invalid' : ''}
                         value={data[l.field] || ''} onChange={e => { update({ [l.field]: e.target.value }); clearError(l.field); }}>
-                        <option value="">â€” Select Business Unit â€”</option>
+                        <option value="">— Select Business Unit —</option>
                         <option value="ATTG">ATTG</option>
                         <option value="CBS">CBS</option>
                         <option value="Law">Law</option>
@@ -633,7 +633,7 @@ function GovernanceStep({ data, update, errors = {}, clearError = () => {} }) {
                     ) : (
                       <select id={l.field} className={errors[l.field] ? 'invalid' : ''}
                         value={data[l.field] || ''} onChange={e => { update({ [l.field]: e.target.value }); clearError(l.field); }}>
-                        <option value="">â€” Select Domain â€”</option>
+                        <option value="">— Select Domain —</option>
                         <option value="Trust Tax">Trust Tax</option>
                         <option value="Private Tax">Private Tax</option>
                         <option value="Global Tax">Global Tax</option>
@@ -658,7 +658,7 @@ function GovernanceStep({ data, update, errors = {}, clearError = () => {} }) {
   );
 }
 
-// â”€â”€â”€ Step 4: Principles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Step 4: Principles ───────────────────────────────────────────────────────
 function PrinciplesStep({ data, update }) {
   const toggle = (field, val) => {
     const arr = data[field] || [];
@@ -739,7 +739,7 @@ function PrinciplesStep({ data, update }) {
   );
 }
 
-// â”€â”€â”€ Step 5: MCP Tools â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Step 5: MCP Tools ────────────────────────────────────────────────────────
 function MCPStep({ data, update }) {
   const toggle = (tool) => {
     const tools = data.tools.includes(tool)
@@ -761,7 +761,7 @@ function MCPStep({ data, update }) {
     <div>
       <div className="step-header">
         <h1>MCP Tools</h1>
-        <p>Select the MCP servers your team will use. We'll generate <code>.vscode/mcp.json</code> with the config â€” just add your tokens and you're ready.</p>
+        <p>Select the MCP servers your team will use. We'll generate <code>.vscode/mcp.json</code> with the config — just add your tokens and you're ready.</p>
       </div>
 
       <div className="mcp-grid">
@@ -783,20 +783,20 @@ function MCPStep({ data, update }) {
       {data.tools.length === 0 && (
         <div className="alert alert-info mt-4">
           <MotifIcon icon={LightBulbOn} size="18" style={{ color: 'var(--ey-charcoal)', flexShrink: 0, marginTop: 1 }} />
-          <div>No MCP tools selected â€” <code>.vscode/mcp.json</code> won't be generated. You can always add tools later.</div>
+          <div>No MCP tools selected — <code>.vscode/mcp.json</code> won't be generated. You can always add tools later.</div>
         </div>
       )}
     </div>
   );
 }
 
-// â”€â”€â”€ Step 6: Agent & LLM â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Step 6: Agent & LLM ─────────────────────────────────────────────────────
 function AgentStep({ data, update }) {
   const AGENTS = [
-    { id: 'github-copilot', icon: ChatBubble,   name: 'GitHub Copilot', desc: 'VS Code + Copilot Chat â€” best with .github/ slash commands', config: '.github/copilot-instructions.md' },
-    { id: 'claude',         icon: Terminal,      name: 'Claude Code',    desc: 'Terminal-based agent â€” uses CLAUDE.md', config: 'CLAUDE.md' },
-    { id: 'cursor',         icon: CodeBrackets,  name: 'Cursor',         desc: 'Cursor IDE â€” uses .cursor/rules/', config: '.cursor/rules/' },
-    { id: 'gemini',         icon: BrainResearch, name: 'Gemini CLI',     desc: 'Google Gemini CLI â€” uses .gemini/', config: '.gemini/' },
+    { id: 'github-copilot', icon: ChatBubble,   name: 'GitHub Copilot', desc: 'VS Code + Copilot Chat — best with .github/ slash commands', config: '.github/copilot-instructions.md' },
+    { id: 'claude',         icon: Terminal,      name: 'Claude Code',    desc: 'Terminal-based agent — uses CLAUDE.md', config: 'CLAUDE.md' },
+    { id: 'cursor',         icon: CodeBrackets,  name: 'Cursor',         desc: 'Cursor IDE — uses .cursor/rules/', config: '.cursor/rules/' },
+    { id: 'gemini',         icon: BrainResearch, name: 'Gemini CLI',     desc: 'Google Gemini CLI — uses .gemini/', config: '.gemini/' },
   ];
 
   const MODELS = {
@@ -872,9 +872,9 @@ function AgentStep({ data, update }) {
   );
 }
 
-// â”€â”€â”€ Step 7: Preview â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Step 7: Preview ──────────────────────────────────────────────────────────
 function PreviewStep({ files, activeTab, onTabChange, copied, onCopy }) {
-  if (!files) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>Generating filesâ€¦</div>;
+  if (!files) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>Generating files…</div>;
   const fileEntries = Object.entries(files);
 
   return (
@@ -883,7 +883,7 @@ function PreviewStep({ files, activeTab, onTabChange, copied, onCopy }) {
         <h1>Preview Generated Files</h1>
         <p>
           {fileEntries.length} files ready. Review the key files below, then click
-          <strong> Publish to GitHub â†’</strong> to create your repository.
+          <strong> Publish to GitHub →</strong> to create your repository.
         </p>
       </div>
 
@@ -900,7 +900,7 @@ function PreviewStep({ files, activeTab, onTabChange, copied, onCopy }) {
         {activeTab && files[activeTab] && (
           <div className="preview-pane">
             <button className="preview-copy-btn" onClick={() => onCopy(activeTab, files[activeTab])}>
-              {copied === activeTab ? 'âœ“ Copied' : 'Copy'}
+              {copied === activeTab ? '✓ Copied' : 'Copy'}
             </button>
             <pre>{files[activeTab]}</pre>
           </div>
@@ -910,7 +910,7 @@ function PreviewStep({ files, activeTab, onTabChange, copied, onCopy }) {
   );
 }
 
-// â”€â”€â”€ Step 8: Publish to GitHub â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Step 8: Publish to GitHub ────────────────────────────────────────────────
 function PublishStep({ files, projectName }) {
   return (
     <div>
