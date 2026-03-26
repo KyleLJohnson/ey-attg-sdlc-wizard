@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "hooks": [
+    {
+      "event": "sessionStart",
+      "script": "audit-session-start.sh"
+    },
+    {
+      "event": "sessionEnd",
+      "script": "audit-session-end.sh"
+    },
+    {
+      "event": "userPromptSubmitted",
+      "script": "audit-prompt.sh"
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+# This file ensures the src/data/ directory is tracked by git.
+# kit-files.json is generated at build time by: npm run bundle-kit
+# and is listed in .gitignore — do not commit it.
