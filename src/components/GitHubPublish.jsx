@@ -29,6 +29,15 @@ function slugify(name) {
     .replace(/^-|-$/g, '');
 }
 
+/** Normalise a full GitHub URL or bare owner/repo string to 'owner/repo'. Returns null if invalid. */
+function parseRepo(input) {
+  const trimmed = (input || '').trim();
+  const urlMatch = trimmed.match(/github\.com\/([a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+)/);
+  if (urlMatch) return urlMatch[1].replace(/\.git$/, '');
+  if (/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(trimmed)) return trimmed;
+  return null;
+}
+
 function ghFetch(path, token, opts = {}) {
   return fetch(`${GITHUB_API}${path}`, {
     ...opts,
