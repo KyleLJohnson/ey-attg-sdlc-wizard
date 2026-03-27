@@ -20,6 +20,7 @@ import { useState } from 'react';
 
 const GITHUB_API = 'https://api.github.com';
 const PAT_CREATE_URL = 'https://github.com/settings/tokens/new?scopes=repo%2Cworkflow&description=EY+ATTG+SDLC+Wizard';
+const FINE_GRAINED_PAT_URL = 'https://github.com/settings/personal-access-tokens/new';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function slugify(name) {
@@ -65,6 +66,10 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
   const [repoName, setRepoName]       = useState(slugify(projectName));
   const [repoDesc, setRepoDesc]       = useState('');
   const [repoPrivate, setRepoPrivate] = useState(false);
+
+  // Greenfield Copilot token (fine-grained PAT for COPILOT_GITHUB_TOKEN secret)
+  const [copilotPat, setCopilotPat]   = useState('');
+  const [showCopilotPat, setShowCopilotPat] = useState(false);
 
   // Brownfield PR config
   const [prBranch, setPrBranch] = useState('sdlc-kit-setup');
@@ -686,7 +691,9 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
           const { default: sodium } = await import('libsodium-wrappers');
           await sodium.ready;
           const publicKeyBytes = sodium.from_base64(key, sodium.base64_variants.ORIGINAL);
-          const secretBytes = sodium.from_string(token);
+          // Use fine-grained PAT if provided; Copilot workflows reject classic ghp_ tokens
+          const secretValue = copilotPat.trim() || token;
+          const secretBytes = sodium.from_string(secretValue);
           const encryptedBytes = sodium.crypto_box_seal(secretBytes, publicKeyBytes);
           const encryptedValue = sodium.to_base64(encryptedBytes, sodium.base64_variants.ORIGINAL);
           await ghFetch(`/repos/${full}/actions/secrets/COPILOT_GITHUB_TOKEN`, token, {
@@ -1011,6 +1018,38 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
                 <div className="item-desc">Only you can see this repository</div>
               </div>
             </label>
+          </div>
+
+          <div className="form-group" style={{ marginTop: 16 }}>
+            <label htmlFor="gh-copilot-pat">
+              Copilot token <span className="badge badge-required">required for workflows</span>
+            </label>
+            <div className="gh-pat-row">
+              <input
+                id="gh-copilot-pat"
+                type={showCopilotPat ? 'text' : 'password'}
+                value={copilotPat}
+                onChange={e => setCopilotPat(e.target.value)}
+                placeholder="github_pat_xxxxxxxxxxxxxxxxxxxx"
+                autoComplete="off"
+                spellCheck={false}
+                disabled={phase === 'pushing'}
+              />
+              <button
+                type="button"
+                className="btn btn-secondary btn-icon"
+                onClick={() => setShowCopilotPat(v => !v)}
+                aria-label={showCopilotPat ? 'Hide token' : 'Show token'}
+                disabled={phase === 'pushing'}
+              >
+                {showCopilotPat ? 'Hide' : 'Show'}
+              </button>
+            </div>
+            <span className="label-hint">
+              Fine-grained PAT stored as <code>COPILOT_GITHUB_TOKEN</code> — required by the Coding Agent workflows.{' '}
+              <a href={FINE_GRAINED_PAT_URL} target="_blank" rel="noopener noreferrer">Create one &rarr;</a>
+              {' '}(needs <strong>Contents</strong>, <strong>Issues</strong>, <strong>Pull requests</strong> read/write on this repo)
+            </span>
           </div>
         </div>
       )}
