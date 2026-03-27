@@ -675,7 +675,30 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
         prevCommitSha = wfCommit.sha;
       }
 
-      // ── Step 6: Create SDLC label + issue ────────────────────────────────
+      // ── Step 6: Set COPILOT_GITHUB_TOKEN secret ─────────────────────────────
+      // The Copilot Coding Agent workflows require this secret to authenticate.
+      // GitHub requires secrets to be encrypted with the repo's libsodium public key.
+      setProgress('Configuring repository secret…');
+      try {
+        const pkRes = await ghFetch(`/repos/${full}/actions/secrets/public-key`, token);
+        if (pkRes.ok) {
+          const { key_id, key } = await pkRes.json();
+          const { default: sodium } = await import('libsodium-wrappers');
+          await sodium.ready;
+          const publicKeyBytes = sodium.from_base64(key, sodium.base64_variants.ORIGINAL);
+          const secretBytes = sodium.from_string(token);
+          const encryptedBytes = sodium.crypto_box_seal(secretBytes, publicKeyBytes);
+          const encryptedValue = sodium.to_base64(encryptedBytes, sodium.base64_variants.ORIGINAL);
+          await ghFetch(`/repos/${full}/actions/secrets/COPILOT_GITHUB_TOKEN`, token, {
+            method: 'PUT',
+            body: { encrypted_value: encryptedValue, key_id },
+          });
+        }
+      } catch {
+        // Secret creation is best-effort; don't block repo setup if it fails
+      }
+
+      // ── Step 7: Create SDLC label + issue ────────────────────────────────
       setProgress('Creating SDLC label…');
       await ghFetch(`/repos/${full}/labels`, token, {
         method: 'POST',
