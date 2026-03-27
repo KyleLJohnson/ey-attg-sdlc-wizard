@@ -35,11 +35,13 @@ const STEPS = [
 
 // ─── Initial Form Data ────────────────────────────────────────────────────────
 const INITIAL = {
+  mode: 'greenfield',   // 'greenfield' | 'brownfield'
   project: {
     name: '', description: '', problemStatement: '',
     personas: [{ id: 1, name: '', description: '', goals: '', painPoints: '' }],
     userOutcome: '', businessOutcome: '', businessConstraints: '', technicalConstraints: '',
     featureSpecMode: 'paste', featureSpecContent: '', featureSpecUrl: '', featureSpecFileName: '',
+    existingRepo: '',   // brownfield only: 'owner/repo' or full GitHub URL
   },
   techStack: {
     languages: [], frontend: '', frontendOther: '',
@@ -82,6 +84,8 @@ export default function Wizard() {
     if (currentStep === 1) {
       if (!d.project.name?.trim())        errs.name        = 'Project name is required';
       if (!d.project.description?.trim()) errs.description = 'One-sentence description is required';
+      if (d.mode === 'brownfield' && !d.project.existingRepo?.trim())
+        errs.existingRepo = 'Existing repository is required for brownfield mode';
     }
     if (currentStep === 3) {
       if (d.governance.levels.includes('bu') && !d.governance.buName?.trim())
@@ -149,9 +153,9 @@ export default function Wizard() {
       {/* ── Main Content ── */}
       <main className="wizard-main">
         <div className="wizard-content">
-          {step === 0 && <WelcomeStep />}
-          {step === 1 && <ProjectStep data={data.project} update={p => update('project', p)} errors={errors} clearError={clearError} />}
-          {step === 2 && <TechStackStep data={data.techStack} update={p => update('techStack', p)} />}
+          {step === 0 && <WelcomeStep mode={data.mode} onModeChange={newMode => setData(d => ({ ...d, mode: newMode }))} />}
+          {step === 1 && <ProjectStep data={data.project} mode={data.mode} update={p => update('project', p)} errors={errors} clearError={clearError} />}
+          {step === 2 && <TechStackStep data={data.techStack} mode={data.mode} update={p => update('techStack', p)} />}
           {step === 3 && <GovernanceStep data={data.governance} update={p => update('governance', p)} errors={errors} clearError={clearError} />}
           {step === 4 && <PrinciplesStep data={data.constitution} update={p => update('constitution', p)} />}
           {step === 5 && <MCPStep data={data.mcp} update={p => update('mcp', p)} />}
@@ -169,6 +173,8 @@ export default function Wizard() {
             <PublishStep
               files={files}
               projectName={data.project.name}
+              mode={data.mode}
+              existingRepo={data.project.existingRepo}
             />
           )}
         </div>
@@ -210,7 +216,7 @@ export default function Wizard() {
 }
 
 // ─── Step 0: Welcome ──────────────────────────────────────────────────────────
-function WelcomeStep() {
+function WelcomeStep({ mode, onModeChange }) {
   return (
     <div className="welcome-hero">
       <div className="welcome-hero-left">
@@ -222,10 +228,47 @@ function WelcomeStep() {
           Answer a few questions about your project and we'll generate a
           complete, plug-and-play kit — all sdd-kit prompts, instructions,
           templates, and pre-filled context files — then push it directly
-          to a new GitHub repository in one click.
+          to GitHub in one click.
         </p>
-        <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-          ~3 minutes &middot; 8 steps &middot; Creates a GitHub repo for you
+
+        {/* Mode selector */}
+        <div style={{ marginTop: 20, marginBottom: 4 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
+            Project type
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button
+              type="button"
+              className={`radio-item ${mode === 'greenfield' ? 'selected' : ''}`}
+              style={{ flex: 1, textAlign: 'left', cursor: 'pointer' }}
+              onClick={() => onModeChange('greenfield')}
+              aria-pressed={mode === 'greenfield'}
+            >
+              <div>
+                <div className="item-label">🌱 New Project</div>
+                <div className="item-desc">Start from scratch — we create a new GitHub repo</div>
+              </div>
+            </button>
+            <button
+              type="button"
+              className={`radio-item ${mode === 'brownfield' ? 'selected' : ''}`}
+              style={{ flex: 1, textAlign: 'left', cursor: 'pointer' }}
+              onClick={() => onModeChange('brownfield')}
+              aria-pressed={mode === 'brownfield'}
+            >
+              <div>
+                <div className="item-label">🏗️ Existing Project</div>
+                <div className="item-desc">Add the SDLC kit to an existing GitHub repo via PR</div>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 12 }}>
+          ~3 minutes &middot; 8 steps &middot;{' '}
+          {mode === 'brownfield'
+            ? 'Opens a PR on your existing repo'
+            : 'Creates a new GitHub repo for you'}
         </p>
       </div>
       <div className="output-cards">
@@ -235,7 +278,9 @@ function WelcomeStep() {
           { icon: ShieldAlt,    file: 'context/constitution.md',        desc: 'Governing principles' },
           { icon: ChatLines,    file: '.github/copilot-instructions.md',desc: 'AI agent context (auto-loaded)' },
           { icon: PlugTypeA,    file: '.vscode/mcp.json',               desc: 'MCP server config' },
-          { icon: Github,       file: 'New GitHub repository',          desc: 'Everything above + all 80+ kit files pushed in one commit' },
+          mode === 'brownfield'
+            ? { icon: Github, file: 'Pull request on your repo', desc: 'Everything above + all 80+ kit files added via PR — nothing merged without your review' }
+            : { icon: Github, file: 'New GitHub repository',     desc: 'Everything above + all 80+ kit files pushed in one commit' },
         ].map(card => (
           <div key={card.file} className="output-card">
             <MotifIcon icon={card.icon} size="18" style={{ color: 'var(--ey-charcoal)', marginTop: 2 }} />
@@ -251,7 +296,7 @@ function WelcomeStep() {
 }
 
 // ─── Step 1: Project Identity ─────────────────────────────────────────────────
-function ProjectStep({ data, update, errors = {}, clearError = () => {} }) {
+function ProjectStep({ data, mode, update, errors = {}, clearError = () => {} }) {
   const addPersona = () =>
     update({ personas: [...data.personas, { id: Date.now(), name: '', description: '', goals: '', painPoints: '' }] });
 
@@ -270,6 +315,36 @@ function ProjectStep({ data, update, errors = {}, clearError = () => {} }) {
 
       <div className="form-section">
         <div className="form-section-title">Core Identity</div>
+
+        {mode === 'brownfield' && (
+          <div className="form-group">
+            <label htmlFor="proj-existing-repo">
+              Existing Repository <span className="badge badge-required">required</span>
+            </label>
+            <input
+              id="proj-existing-repo"
+              type="text"
+              className={errors.existingRepo ? 'invalid' : ''}
+              value={data.existingRepo || ''}
+              onChange={e => {
+                // Normalise full URL to owner/repo
+                let val = e.target.value.trim();
+                const match = val.match(/github\.com\/([^\/]+\/[^\/\s?#]+)/);
+                if (match) val = match[1].replace(/\.git$/, '');
+                update({ existingRepo: val });
+                clearError('existingRepo');
+              }}
+              placeholder="owner/repo or https://github.com/owner/repo"
+              autoComplete="off"
+              spellCheck={false}
+            />
+            {errors.existingRepo
+              ? <span className="field-error">{errors.existingRepo}</span>
+              : <span className="label-hint">The SDLC kit will be added as a pull request on this repo</span>
+            }
+          </div>
+        )}
+
         <div className="form-group">
           <label htmlFor="proj-name">Project Name <span className="badge badge-required">required</span></label>
           <input id="proj-name" type="text" className={errors.name ? 'invalid' : ''} value={data.name}
@@ -390,7 +465,7 @@ function ProjectStep({ data, update, errors = {}, clearError = () => {} }) {
 }
 
 // ─── Step 2: Tech Stack ───────────────────────────────────────────────────────
-function TechStackStep({ data, update }) {
+function TechStackStep({ data, mode, update }) {
   const toggle = (field, val) => {
     const arr = data[field] || [];
     update({ [field]: arr.includes(val) ? arr.filter(x => x !== val) : [...arr, val] });
@@ -404,8 +479,13 @@ function TechStackStep({ data, update }) {
   return (
     <div>
       <div className="step-header">
-        <h1>Tech Stack</h1>
-        <p>Define the approved technologies. This fills in <code>context/tech-stack.md</code> — the AI agent references this before every code task.</p>
+        <h1>{mode === 'brownfield' ? 'Describe Your Current Stack' : 'Tech Stack'}</h1>
+        <p>
+          {mode === 'brownfield'
+            ? <>Select everything used in the existing codebase. This fills in <code>context/tech-stack.md</code> and filters which coding instruction files the kit includes — the Planning agent will validate and refine it further.</>
+            : <>Define the approved technologies. This fills in <code>context/tech-stack.md</code> — the AI agent references this before every code task.</>
+          }
+        </p>
       </div>
 
       <div className="form-section">
@@ -911,20 +991,25 @@ function PreviewStep({ files, activeTab, onTabChange, copied, onCopy }) {
 }
 
 // ─── Step 8: Publish to GitHub ────────────────────────────────────────────────
-function PublishStep({ files, projectName }) {
+function PublishStep({ files, projectName, mode, existingRepo }) {
+  const fileCount = files ? Object.keys(files).length : 0;
   return (
     <div>
       <div className="step-header">
         <h1>Publish to GitHub</h1>
         <p>
-          Enter a Personal Access Token to create a new repository and push all{' '}
-          {files ? Object.keys(files).length : 0} files in a single initial commit.
+          {mode === 'brownfield'
+            ? <>Enter a Personal Access Token to open a pull request on <strong>{existingRepo || 'your existing repo'}</strong> with all {fileCount} kit files — nothing merged without your review.</>
+            : <>Enter a Personal Access Token to create a new repository and push all {fileCount} files in a single initial commit.</>
+          }
         </p>
       </div>
 
       <GitHubPublish
         files={files}
         projectName={projectName}
+        mode={mode}
+        existingRepo={existingRepo}
       />
     </div>
   );
