@@ -175,6 +175,7 @@ export default function Wizard() {
               projectName={data.project.name}
               mode={data.mode}
               existingRepo={data.project.existingRepo}
+              wizardData={data}
             />
           )}
         </div>
@@ -991,7 +992,7 @@ function PreviewStep({ files, activeTab, onTabChange, copied, onCopy }) {
 }
 
 // ─── Step 8: Publish to GitHub ────────────────────────────────────────────────
-function PublishStep({ files, projectName, mode, existingRepo }) {
+function PublishStep({ files, projectName, mode, existingRepo, wizardData }) {
   const fileCount = files ? Object.keys(files).length : 0;
   return (
     <div>
@@ -1010,7 +1011,7 @@ function PublishStep({ files, projectName, mode, existingRepo }) {
         projectName={projectName}
         mode={mode}
         existingRepo={existingRepo}
-        wizardData={data}
+        wizardData={wizardData}
       />
     </div>
   );
