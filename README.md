@@ -63,6 +63,9 @@ A browser-based wizard that generates a fully configured [Spec-Driven Developmen
 | Workflow files in final commit | `.github/workflows/` files require the `workflow` PAT scope; they are pushed in a dedicated last commit so scope errors surface clearly |
 | libsodium-wrappers (lazy) | Required by the GitHub Secrets API to encrypt PAT values; dynamically imported to keep the initial bundle lean |
 | Single classic PAT | `ghp_` token is the only credential required — used for repo creation, push, and API operations |
+| Repo analysis before PR | For brownfield targets, the full git tree is fetched before any write; files that already exist are excluded, and repos with nothing new are skipped entirely — no accidental overwrites |
+| Tech-role filtering | Framework-specific instruction files are tagged frontend/backend and filtered per repo based on the repo name slug — frontend repos don't receive backend instructions and vice versa |
+| Comprehensive SDLC issue | The generated issue includes every field filled in during the wizard: personas, feature spec, NFRs, full tech stack, governance, architecture principles, and agent/LLM config |
 
 ---
 
@@ -280,11 +283,16 @@ Brownfield mode supports **up to 3 target repositories** for multi-repo projects
 4. Enter **Repo 1** (required) and optionally **Repo 2** and **Repo 3** in `owner/repo` format
 5. Click **Create pull request**
 
-The wizard will:
-- Open one PR per repository, each on an auto-named branch `{project-name}_sdlc_wizard`
-- Route kit files to the appropriate repo using **path-prefix routing (Option A)**
-- If a feature spec was provided in the wizard, upgrade to **AI-driven routing (Option B)** — the GitHub Models API analyzes the spec to decide which files belong in which repo, falling back to Option A silently if the call fails
-- Automatically create the SDLC issue on Repo 1, listing all target repos
+For each repository the wizard will, in order:
+
+1. **Analyse the repo** — fetch its full file tree via the GitHub API and build a list of every path already present
+2. **Route by path prefix** — assign files to each repo using path-prefix routing (Option A); upgraded to AI-driven routing (Option B) when 2+ repos and a feature spec are provided
+3. **Filter by tech role** — strip instruction files that don't match the repo's role (frontend vs backend), inferred from the repo name slug (see table below)
+4. **Skip already-present files** — any file that already exists in the repo is excluded so nothing is ever overwritten
+5. **Skip the repo entirely** if no new files remain after the above filters — no branch or PR is created, and a "N files already present — no PR needed" badge is shown in the success screen instead
+6. Otherwise, **open a PR** with a dynamic body that lists the actual new files by category and notes how many were skipped
+
+The SDLC summary issue is created on Repo 1 and includes all fields filled out during the wizard (personas, feature spec, NFRs, full tech stack, governance, architecture principles, agent & LLM config).
 
 #### Multi-repo file routing
 
@@ -292,6 +300,18 @@ The wizard will:
 |---|---|---|
 | **Option A** — path-prefix | Always (default) | `src/`, `app/`, `frontend/` → Repo 2; `api/`, `server/`, `backend/` → Repo 3; shared infrastructure (`context/`, `.github/`, `sdd-kit/`) → all repos |
 | **Option B** — AI-driven | 2+ repos **and** a feature spec is present | Sends the spec + file list to `gpt-4o-mini` via GitHub Models API; the model returns a per-file routing map that overrides Option A (per-file fallback to Option A when not in map) |
+
+#### Tech-role filtering (multi-repo only)
+
+When more than one repo is targeted, framework-specific instruction files are filtered so they only land in a repo whose purpose matches:
+
+| Role inferred from repo name | Kept | Removed |
+|---|---|---|
+| **Frontend** — slug contains `frontend`, `fe-`, `ui`, `web`, `client`, `react`, `angular`, `next`, `portal`, `spa` | All shared files + `reactjs`, `nextjs`, `angular`, `motif-design-system`, `a11y` instructions | `aspnet-rest-apis`, `nestjs`, `springboot`, `python`, `swagger-api-docs`, `containerization`, `kubernetes` instructions |
+| **Backend** — slug contains `backend`, `api`, `be-`, `server`, `service`, `aspnet`, `spring`, `nest`, `python`, `worker` | All shared files + `aspnet-rest-apis`, `nestjs`, `springboot`, `python`, `swagger-api-docs`, `containerization`, `kubernetes` instructions | `reactjs`, `nextjs`, `angular`, `motif-design-system`, `a11y` instructions |
+| **Fullstack** — anything else | All files | Nothing removed |
+
+Shared instruction files (`agent-behavior`, `agent-safety`, `security-and-owasp`, `typescript-5-es2022`, `github-actions`, `azure-devops-pipelines`, `governance`, `sdd-workflow`, etc.) are always sent to every repo regardless of role.
 
 ---
 
