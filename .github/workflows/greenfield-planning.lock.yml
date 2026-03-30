@@ -37,9 +37,6 @@ name: "Greenfield Planning"
         default: Task Management System.txt
         description: Path in KyleLJohnson/centralrepo@main to read (file or directory).
         required: true
-  issues:
-    types:
-      - labeled
   pull_request:
     types:
       - closed
@@ -55,7 +52,7 @@ run-name: "Greenfield Planning${{ github.event.issue && format(' (Issue #{0})', 
 
 jobs:
   activation:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.issue.labels.*.name, 'SDLC') || (github.event_name == 'pull_request' && github.event.pull_request.merged == false && startsWith(github.event.pull_request.head.ref, 'copilot/plan-'))
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.merged == false && startsWith(github.event.pull_request.head.ref, 'copilot/plan-'))
     runs-on: ubuntu-slim
     permissions:
       contents: read

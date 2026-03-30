@@ -11,8 +11,6 @@ on:
         description: "Optional project/app name used in scaffolding/docs."
         required: false
         default: "task-management-system"
-  issues:
-    types: [labeled]
   pull_request:
     types: [closed]
     paths:
