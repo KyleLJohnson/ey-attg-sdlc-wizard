@@ -40,6 +40,191 @@ function parseRepo(input) {
   return null;
 }
 
+// ── Tech-role routing ──────────────────────────────────────────────────────
+// Instruction files that only belong in a frontend or backend repo.
+// Anything not listed here is treated as 'shared' → goes to every repo.
+const FILE_ROLE = {
+  // Frontend-only
+  '.github/instructions/a11y.instructions.md':                      'frontend',
+  '.github/instructions/angular.instructions.md':                   'frontend',
+  '.github/instructions/motif-design-system.instructions.md':       'frontend',
+  '.github/instructions/nextjs.instructions.md':                    'frontend',
+  '.github/instructions/reactjs.instructions.md':                   'frontend',
+  // Backend-only
+  '.github/instructions/aspnet-rest-apis.instructions.md':                       'backend',
+  '.github/instructions/containerization-docker-best-practices.instructions.md': 'backend',
+  '.github/instructions/kubernetes-deployment-best-practices.instructions.md':   'backend',
+  '.github/instructions/nestjs.instructions.md':                                 'backend',
+  '.github/instructions/python.instructions.md':                                 'backend',
+  '.github/instructions/springboot.instructions.md':                             'backend',
+  '.github/instructions/swagger-api-docs.instructions.md':                       'backend',
+};
+
+/**
+ * Infer whether a repo is frontend, backend, or fullstack from its name.
+ * repoName is 'owner/repo' — we look at the repo slug only.
+ */
+function classifyRepoRole(repoName) {
+  const slug = (repoName || '').split('/').pop().toLowerCase();
+  const FE = ['frontend', 'fe-', '-fe', '.fe', 'ui', 'web', 'client',
+               'react', 'angular', 'next', 'portal', 'spa'];
+  const BE = ['backend', 'api', 'be-', '-be', '.be', 'server', 'service',
+               'services', 'aspnet', 'spring', 'nest', 'python', 'worker'];
+  if (FE.some(p => slug.includes(p))) return 'frontend';
+  if (BE.some(p => slug.includes(p))) return 'backend';
+  return 'fullstack';
+}
+
+/**
+ * Remove files whose tech role doesn't match the repo's role.
+ * Only applied when there are multiple target repos — a single repo always
+ * receives every file that passed path-prefix routing.
+ */
+function filterByRepoRole(fileMap, repoName, totalRepos) {
+  if (totalRepos <= 1) return fileMap;
+  const role = classifyRepoRole(repoName);
+  if (role === 'fullstack') return fileMap;
+  const result = {};
+  for (const [path, content] of Object.entries(fileMap)) {
+    const fileRole = FILE_ROLE[path] || 'shared';
+    if (fileRole === 'shared' || fileRole === role) result[path] = content;
+  }
+  return result;
+}
+
+// ── Build comprehensive issue body from all wizard data ─────────────────────
+function buildIssueBody(wizardData, projectName, { repoDesc = '', targetRepos = [] } = {}) {
+  const p   = wizardData?.project      || {};
+  const ts  = wizardData?.techStack    || {};
+  const gov = wizardData?.governance   || {};
+  const con = wizardData?.constitution || {};
+  const ag  = wizardData?.agent        || {};
+  const mc  = wizardData?.mcp          || {};
+  const lines = [];
+
+  // ── Project Summary ──────────────────────────────────────────────────────
+  lines.push('## Project Summary', '');
+  lines.push(`**Name:** ${projectName}`);
+  const desc = repoDesc || p.description;
+  if (desc) lines.push(`**Description:** ${desc}`);
+  if (p.problemStatement) lines.push(`**Problem Statement:** ${p.problemStatement}`);
+  if (p.userOutcome)      lines.push(`**User Outcome:** ${p.userOutcome}`);
+  if (p.businessOutcome)  lines.push(`**Business Outcome:** ${p.businessOutcome}`);
+
+  // ── Repositories (brownfield only) ───────────────────────────────────────
+  if (targetRepos.length > 0) {
+    lines.push('', '## Repositories');
+    targetRepos.forEach((r, i) => lines.push(`- **Repository ${i + 1}:** ${r}`));
+  }
+
+  // ── Personas ─────────────────────────────────────────────────────────────
+  const filledPersonas = (p.personas || []).filter(pe => pe.name?.trim());
+  if (filledPersonas.length > 0) {
+    lines.push('', '## Users & Personas');
+    lines.push('| Role | Description | Goals | Pain Points |');
+    lines.push('|---|---|---|---|');
+    filledPersonas.forEach(pe =>
+      lines.push(`| ${pe.name} | ${pe.description || ''} | ${pe.goals || ''} | ${pe.painPoints || ''} |`)
+    );
+  }
+
+  // ── Feature Specification ────────────────────────────────────────────────
+  const hasSpec = p.featureSpecContent?.trim() || p.featureSpecUrl?.trim();
+  if (hasSpec) {
+    lines.push('', '## Feature Specification');
+    if (p.featureSpecMode === 'ado' && p.featureSpecUrl?.trim()) {
+      lines.push(`**ADO Work Item:** ${p.featureSpecUrl.trim()}`);
+    } else if (p.featureSpecMode === 'file' && p.featureSpecFileName) {
+      lines.push(`**Source File:** ${p.featureSpecFileName}`);
+    }
+    if (p.featureSpecContent?.trim()) {
+      const content = p.featureSpecContent.trim();
+      const truncated = content.length > 2000
+        ? content.slice(0, 2000) + '\n\n_[truncated — see full spec in repo]_'
+        : content;
+      lines.push('', '<details><summary>View feature specification</summary>', '', '```', truncated, '```', '', '</details>');
+    }
+  }
+
+  // ── Non-Functional Requirements ──────────────────────────────────────────
+  const hasBizConstraints  = p.businessConstraints?.trim();
+  const hasTechConstraints = p.technicalConstraints?.trim();
+  if (hasBizConstraints || hasTechConstraints) {
+    lines.push('', '## Non-Functional Requirements');
+    if (hasBizConstraints) {
+      lines.push('**Business Constraints:**');
+      p.businessConstraints.trim().split('\n').filter(Boolean).forEach(c => lines.push(`- ${c.trim()}`));
+    }
+    if (hasTechConstraints) {
+      lines.push('**Technical Constraints:**');
+      p.technicalConstraints.trim().split('\n').filter(Boolean).forEach(c => lines.push(`- ${c.trim()}`));
+    }
+  }
+
+  // ── Tech Stack ───────────────────────────────────────────────────────────
+  lines.push('', '## Tech Stack');
+  if (ts.languages?.length)      lines.push(`**Languages:** ${ts.languages.join(', ')}`);
+  if (ts.frontend && ts.frontend !== 'none') {
+    const fe = ts.frontendOther ? `${ts.frontend} (${ts.frontendOther})` : ts.frontend;
+    lines.push(`**Frontend:** ${fe}`);
+  }
+  if (ts.backend && ts.backend !== 'none') {
+    const be = ts.backendOther ? `${ts.backend} (${ts.backendOther})` : ts.backend;
+    lines.push(`**Backend:** ${be}`);
+  }
+  if (ts.database && ts.database !== 'none') lines.push(`**Database:** ${ts.database}`);
+  const infra = (ts.infrastructure || []).filter(i => i !== 'none');
+  if (infra.length)               lines.push(`**Infrastructure:** ${infra.join(', ')}`);
+  if (ts.testing?.length)         lines.push(`**Testing:** ${ts.testing.join(', ')}`);
+  if (ts.sourceControl)           lines.push(`**Source Control:** ${ts.sourceControl}`);
+  if (ts.devops?.length)          lines.push(`**DevOps / CI:** ${ts.devops.join(', ')}`);
+  if (ts.identityPlatform?.length) lines.push(`**Identity Platform:** ${ts.identityPlatform.join(', ')}`);
+  const extras = [
+    ts.useSwagger && 'OpenAPI / Swagger',
+    ts.useMotif   && 'EY Motif Design System',
+    ts.useA11y    && 'Accessibility (WCAG AA)',
+  ].filter(Boolean);
+  if (extras.length) lines.push(`**Extras:** ${extras.join(', ')}`);
+
+  // ── Governance ───────────────────────────────────────────────────────────
+  const govLevels = gov.levels || [];
+  if (govLevels.length || gov.buName || gov.domainName) {
+    lines.push('', '## Governance');
+    if (govLevels.length) {
+      const levelLabels = { product: 'L1 Product', enterprise: 'L0 Enterprise', bu: 'L2 Business Unit', domain: 'L3 Domain' };
+      lines.push(`**Levels:** ${govLevels.map(l => levelLabels[l] || l).join(', ')}`);
+    }
+    if (gov.buName)     lines.push(`**Business Unit:** ${gov.buName}`);
+    if (gov.domainName) lines.push(`**Domain:** ${gov.domainName}`);
+  }
+
+  // ── Architecture & Principles ────────────────────────────────────────────
+  const hasPrinciples = con.architectureStyle || con.security?.length ||
+    con.codeQuality || con.performance ||
+    (con.testCoverage !== undefined && con.testCoverage !== '') || con.additionalRules;
+  if (hasPrinciples) {
+    lines.push('', '## Architecture & Principles');
+    if (con.architectureStyle) lines.push(`**Architecture Style:** ${con.architectureStyle}`);
+    if (con.security?.length)  lines.push(`**Security:** ${con.security.join(', ')}`);
+    if (con.testCoverage !== undefined && con.testCoverage !== '') {
+      lines.push(`**Test Coverage Target:** ${con.testCoverage}%`);
+    }
+    if (con.codeQuality)     lines.push(`**Code Quality:** ${con.codeQuality}`);
+    if (con.performance)     lines.push(`**Performance:** ${con.performance}`);
+    if (con.additionalRules) lines.push(`**Additional Rules:** ${con.additionalRules}`);
+  }
+
+  // ── Agent & LLM ──────────────────────────────────────────────────────────
+  lines.push('', '## Agent & LLM');
+  if (ag.primary)           lines.push(`**Primary Agent:** ${ag.primary}`);
+  if (ag.model)             lines.push(`**Model:** ${ag.model}`);
+  if (ag.secondary?.length) lines.push(`**Secondary Agents:** ${ag.secondary.join(', ')}`);
+  if (mc.tools?.length)     lines.push(`**MCP Tools:** ${mc.tools.join(', ')}`);
+
+  lines.push('', '---', '*Generated by the EY ATTG SDLC Wizard.*');
+  return lines.join('\n');
+}
+
 function ghFetch(path, token, opts = {}) {
   return fetch(`${GITHUB_API}${path}`, {
     ...opts,
@@ -234,9 +419,11 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
     try {
       for (let repoIndex = 0; repoIndex < targetRepos.length; repoIndex++) {
         const targetRepo = targetRepos[repoIndex];
-        const repoFiles = aiRoutingMap
+        const routedFiles = aiRoutingMap
           ? applyAiRouting(files, aiRoutingMap, repoIndex, targetRepos.length)
           : routeFilesToRepo(files, repoIndex, targetRepos.length);
+        // Remove instruction files that don't belong in this repo's tech role
+        const repoFiles = filterByRepoRole(routedFiles, targetRepo, targetRepos.length);
         const repoLabel = targetRepos.length > 1 ? ` (${repoIndex + 1}/${targetRepos.length}: ${targetRepo})` : ` (${targetRepo})`;
 
         // Step 1: Verify access + get default branch
@@ -262,8 +449,34 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
         if (!commitRes.ok) throw new Error('Could not read latest commit.');
         const baseTreeSha = (await commitRes.json()).tree.sha;
 
+        // Step 3.5: Analyse repo — collect existing paths so we never overwrite them
+        setProgress(`Analysing existing files in ${targetRepo}…`);
+        const existingPaths = new Set();
+        const existingTreeRes = await ghFetch(
+          `/repos/${targetRepo}/git/trees/${baseTreeSha}?recursive=1`, token,
+        );
+        if (existingTreeRes.ok) {
+          const treePayload = await existingTreeRes.json();
+          (treePayload.tree || [])
+            .filter(e => e.type === 'blob')
+            .forEach(e => existingPaths.add(e.path));
+        }
+
+        // Keep only files absent from the repo
+        const filteredRepoFiles = Object.fromEntries(
+          Object.entries(repoFiles).filter(([p]) => !existingPaths.has(p)),
+        );
+        const skippedCount = Object.keys(repoFiles).length - Object.keys(filteredRepoFiles).length;
+
+        if (Object.keys(filteredRepoFiles).length === 0) {
+          // All candidate files already exist — no PR needed for this repo
+          collectedPrUrls.push({ repo: targetRepo, url: null, skipped: true, skippedCount });
+          if (repoIndex < targetRepos.length - 1) await new Promise(r => setTimeout(r, 500));
+          continue;
+        }
+
         // Step 4: Build & commit files in batches using nested subtrees
-        const allEntries   = Object.entries(repoFiles);
+        const allEntries   = Object.entries(filteredRepoFiles);
         const nonWfEntries = allEntries.filter(([p]) => !p.includes('.github/workflows/'));
         const wfEntries    = allEntries.filter(([p]) =>  p.includes('.github/workflows/'));
 
@@ -414,27 +627,50 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
 
         // Open PR on this repo
         setProgress(`Opening pull request on ${targetRepo}…`);
+
+        // Build a dynamic PR body listing the actual new files by category
+        const newFileCount = Object.keys(filteredRepoFiles).length;
+        const catMap = [
+          ['Context files (`context/`)',                  p => p.startsWith('context/')],
+          ['GitHub & Copilot instructions (`.github/`)', p => p.startsWith('.github/')],
+          ['sdd-kit files (`sdd-kit/`)',                  p => p.startsWith('sdd-kit/')],
+          ['VS Code config (`.vscode/`)',                p => p.startsWith('.vscode/')],
+          ['Root files',                                 p => !p.includes('/')],
+          ['Other',                                      () => true],
+        ];
+        const assigned = new Set();
+        const fileListLines = [];
+        for (const [cat, test] of catMap) {
+          const paths = Object.keys(filteredRepoFiles).filter(p => !assigned.has(p) && test(p));
+          if (paths.length === 0) continue;
+          paths.forEach(p => assigned.add(p));
+          fileListLines.push(`\n**${cat}** — ${paths.length} file${paths.length > 1 ? 's' : ''}`);
+          paths.slice(0, 8).forEach(p => fileListLines.push(`- \`${p}\``));
+          if (paths.length > 8) fileListLines.push(`- _…and ${paths.length - 8} more_`);
+        }
+
+        const prBody = [
+          '## SpecDD Starter Kit',
+          '',
+          `This PR adds the EY ATTG SDLC Starter Kit to **${projectName || targetRepo}**.`,
+          skippedCount > 0
+            ? `\n> **Note:** ${skippedCount} file${skippedCount > 1 ? 's' : ''} already existed in this repo and were not overwritten.`
+            : '',
+          '',
+          `### ${newFileCount} new file${newFileCount > 1 ? 's' : ''} added`,
+          ...fileListLines,
+          '',
+          '---',
+          '*Generated by the EY ATTG SDLC Wizard.*',
+        ].join('\n');
+
         const prRes = await ghFetch(`/repos/${targetRepo}/pulls`, token, {
           method: 'POST',
           body: {
             title: 'chore: add SpecDD Starter Kit',
-            body: [
-              '## SpecDD Starter Kit',
-              '',
-              `This PR adds the EY ATTG SDLC Starter Kit to **${projectName || targetRepo}**.`,
-              '',
-              '### What\'s included',
-              '- `context/project.md` — project identity & personas',
-              '- `context/tech-stack.md` — approved technologies',
-              '- `context/constitution.md` — governing principles',
-              '- `.github/copilot-instructions.md` — AI agent context (auto-loaded by Copilot)',
-              '- All 80+ sdd-kit instruction, template, and agent files',
-              '',
-              '---',
-              '*Generated by the EY ATTG SDLC Wizard.*',
-            ].join('\n'),
-            head: prBranchName,
-            base: defaultBranch,
+            body:  prBody,
+            head:  prBranchName,
+            base:  defaultBranch,
           },
         });
         if (!prRes.ok) {
@@ -460,37 +696,7 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
           method: 'POST',
           body: { name: 'SDLC', color: '0075ca', description: 'Tracks SDLC project issues' },
         });
-        const p = wizardData?.project || {};
-        const ts = wizardData?.techStack || {};
-        const ag = wizardData?.agent || {};
-        const mc = wizardData?.mcp || {};
-        const issueBody = [
-          '## Project Summary',
-          '',
-          `**Name:** ${projectName || primaryRepo}`,
-          p.description ? `**Description:** ${p.description}` : '',
-          p.problemStatement ? `**Problem Statement:** ${p.problemStatement}` : '',
-          p.userOutcome ? `**User Outcome:** ${p.userOutcome}` : '',
-          p.businessOutcome ? `**Business Outcome:** ${p.businessOutcome}` : '',
-          '',
-          '## Repositories',
-          ...targetRepos.map((r, i) => `- **Repository ${i + 1}:** ${r}`),
-          '',
-          '## Tech Stack',
-          ts.languages?.length ? `**Languages:** ${ts.languages.join(', ')}` : '',
-          ts.frontend ? `**Frontend:** ${ts.frontend}` : '',
-          ts.backend ? `**Backend:** ${ts.backend}` : '',
-          ts.database ? `**Database:** ${ts.database}` : '',
-          ts.infrastructure?.length ? `**Infrastructure:** ${ts.infrastructure.join(', ')}` : '',
-          '',
-          '## Agent & LLM',
-          ag.primary ? `**Primary Agent:** ${ag.primary}` : '',
-          ag.model ? `**Model:** ${ag.model}` : '',
-          mc.tools?.length ? `**MCP Tools:** ${mc.tools.join(', ')}` : '',
-          '',
-          '---',
-          '*Generated by the EY ATTG SDLC Wizard.*',
-        ].filter(line => line !== '').join('\n');
+        const issueBody = buildIssueBody(wizardData, projectName || primaryRepo, { targetRepos });
         const issueRes = await ghFetch(`/repos/${primaryRepo}/issues`, token, {
           method: 'POST',
           body: {
@@ -818,34 +1024,7 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
       });
 
       setProgress('Creating project summary issue…');
-      const p = wizardData?.project || {};
-      const ts = wizardData?.techStack || {};
-      const ag = wizardData?.agent || {};
-      const mc = wizardData?.mcp || {};
-      const issueBody = [
-        `## Project Summary`,
-        ``,
-        `**Name:** ${projectName || repoName.trim()}`,
-        (repoDesc.trim() || p.description) ? `**Description:** ${repoDesc.trim() || p.description}` : '',
-        p.problemStatement ? `**Problem Statement:** ${p.problemStatement}` : '',
-        p.userOutcome ? `**User Outcome:** ${p.userOutcome}` : '',
-        p.businessOutcome ? `**Business Outcome:** ${p.businessOutcome}` : '',
-        ``,
-        `## Tech Stack`,
-        ts.languages?.length ? `**Languages:** ${ts.languages.join(', ')}` : '',
-        ts.frontend ? `**Frontend:** ${ts.frontend}` : '',
-        ts.backend ? `**Backend:** ${ts.backend}` : '',
-        ts.database ? `**Database:** ${ts.database}` : '',
-        ts.infrastructure?.length ? `**Infrastructure:** ${ts.infrastructure.join(', ')}` : '',
-        ``,
-        `## Agent & LLM`,
-        ag.primary ? `**Primary Agent:** ${ag.primary}` : '',
-        ag.model ? `**Model:** ${ag.model}` : '',
-        mc.tools?.length ? `**MCP Tools:** ${mc.tools.join(', ')}` : '',
-        ``,
-        `---`,
-        `*Generated by the EY ATTG SDLC Wizard.*`,
-      ].filter(line => line !== '').join('\n');
+      const issueBody = buildIssueBody(wizardData, projectName || repoName.trim(), { repoDesc: repoDesc.trim() });
       const issueRes = await ghFetch(`/repos/${full}/issues`, token, {
         method: 'POST',
         body: {
@@ -871,21 +1050,38 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
   if (phase === 'done') {
     // ── Brownfield success ──
     if (mode === 'brownfield') {
+      const createdPrs = prUrls.filter(p => !p.skipped);
+      const skippedPrs = prUrls.filter(p => p.skipped);
+      const allSkipped = createdPrs.length === 0;
       return (
         <div className="gh-success">
-          <div className="gh-success-check">✓</div>
-          <h3>Pull request{prUrls.length > 1 ? 's' : ''} created!</h3>
+          <div className="gh-success-check">{allSkipped ? '✓' : '✓'}</div>
+          <h3>
+            {allSkipped
+              ? 'Nothing to add — repos are up to date'
+              : `Pull request${createdPrs.length > 1 ? 's' : ''} created!`}
+          </h3>
           <p>
-            Your SpecDD Starter Kit has been added as a pull request on{' '}
-            <strong>{targetRepos.join(', ')}</strong>. Review the diff and merge when ready.
+            {allSkipped
+              ? 'All kit files already existed in the target repositories — no pull requests were needed.'
+              : <>Your SpecDD Starter Kit has been added as a pull request on{' '}
+                  <strong>{createdPrs.map(p => p.repo).join(', ')}</strong>. Review the diff and merge when ready.
+                </>}
           </p>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 24 }}>
-            {prUrls.map(({ repo, url }) => (
-              <a key={url} href={url} target="_blank" rel="noopener noreferrer"
-                className="btn btn-github" style={{ display: 'inline-flex', gap: 8 }}>
-                <GHIcon />
-                Open PR{targetRepos.length > 1 ? ` (${repo})` : ''} →
-              </a>
+            {prUrls.map(({ repo, url, skipped, skippedCount }) => (
+              skipped
+                ? <span key={repo}
+                    style={{ fontSize: 13, color: 'var(--text-muted)', alignSelf: 'center',
+                             background: 'var(--surface-2,#f5f5f5)', borderRadius: 6,
+                             padding: '6px 12px' }}>
+                    {repo}: {skippedCount} file{skippedCount > 1 ? 's' : ''} already present — no PR needed
+                  </span>
+                : <a key={url} href={url} target="_blank" rel="noopener noreferrer"
+                    className="btn btn-github" style={{ display: 'inline-flex', gap: 8 }}>
+                    <GHIcon />
+                    Open PR{targetRepos.length > 1 ? ` (${repo})` : ''} →
+                  </a>
             ))}
             {issueUrl && (
               <a href={issueUrl} target="_blank" rel="noopener noreferrer"
