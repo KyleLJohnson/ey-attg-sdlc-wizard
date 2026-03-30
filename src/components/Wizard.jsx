@@ -1010,6 +1010,7 @@ function PublishStep({ files, projectName, mode, existingRepo }) {
         projectName={projectName}
         mode={mode}
         existingRepo={existingRepo}
+        wizardData={data}
       />
     </div>
   );
