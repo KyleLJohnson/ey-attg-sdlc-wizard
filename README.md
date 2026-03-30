@@ -71,32 +71,79 @@ A browser-based wizard that generates a fully configured [Spec-Driven Developmen
 
 ## Agentic Workflow
 
-After the wizard publishes a new repository, three GitHub Actions / GitHub Copilot Coding Agent workflows are active immediately:
+After the wizard publishes a repository, a four-agent system driven by a single workflow automates the full implementation cycle:
 
 ```
-Developer commits docs/plan.md
+Developer creates / updates planning.md and merges PR into any branch
+          │
+          ▼
+┌──────────────────────────────────────┐
+│  mainworkflow.yml                    │  Trigger: PR merged (non-Copilot/
+│  "Create multiple issues"            │           non-automation actor)
+│                                      │           OR workflow_dispatch
+│  Reads planning.md → creates 3       │
+│  GitHub Issues labeled "copilot",    │  Guard: skips if PR was opened by
+│  assigned to the Copilot agent:      │  copilot[bot] / github-actions[bot]
+│                                      │  or branch starts with copilot/
+│  1. "UI/UX changes"                  │
+│  2. "Backend changes"                │
+│  3. "Testing changes"                │
+└──────┬──────────┬──────────┬─────────┘
+       │          │          │
+       ▼          ▼          ▼
+┌──────────┐ ┌──────────┐ ┌──────────────┐
+│ ui-ux    │ │ backend  │ │ testing      │
+│ agent.md │ │ agent.md │ │ agent.md     │
+│          │ │          │ │              │
+│ Reads    │ │ Reads    │ │ Reads        │
+│ plan.md, │ │ plan.md, │ │ plan.md,     │
+│ makes FE │ │ implements│ │ writes unit  │
+│ changes  │ │ FastAPI   │ │ tests for FE │
+│ only     │ │ backend   │ │ and BE       │
+│          │ │ only      │ │ (no app code)│
+└──────────┘ └──────────┘ └──────────────┘
+       \          │          /
+        \         │         /
+         ▼        ▼        ▼
+       Each agent opens its own PR
+```
+
+### Planning agent
+
+Before the workflow fires, a developer (or the **planning agent**) resolves a GitHub Issue into a detailed implementation plan:
+
+```
+GitHub Issue created
           │
           ▼
 ┌─────────────────────────────┐
-│  greenfield-coding.md       │  Trigger: push to docs/plan.md on main
-│  Copilot Coding Agent       │           OR closed implementation PR
-│                             │  Action:  reads plan.md → implements
-│  Requires:                  │           MVP → opens PR on
-│    COPILOT_GITHUB_TOKEN      │           copilot/implement-* branch
-└──────────────┬──────────────┘
-               │  opens PR
-               ▼
-┌─────────────────────────────┐
-│  greenfield-testing.md      │  Trigger: implementation PR opened/updated
-│  Copilot Coding Agent       │  Action:  writes or updates tests for the
-│                             │           PR's changed files
-└──────────────┬──────────────┘
-               │  PR reviewed & merged
-               ▼
-          Production code
+│  planning.agent.md          │  Assigned to the "planningAgent" custom agent
+│                             │  Reads the issue body → produces a structured
+│  Output: planned/plan.md   │  plan covering frontend, backend, and database
+│  (todo list for all agents) │  Opens a PR on Planning_Branch
+└─────────────────────────────┘
+          │  PR merged
+          ▼
+   mainworkflow.yml fires
 ```
 
-`greenfield-planning.md` provides an alternative trigger for teams using a central spec repository pattern. It is activated by `workflow_dispatch` or a re-run via pull request — it does **not** auto-start when an issue is labeled.
+### Agent responsibilities
+
+| Agent | File | Scope | Source of truth |
+|---|---|---|---|
+| **planningAgent** | `planning.agent.md` | Creates `planned/plan.md` from a GitHub Issue | Issue body |
+| **Backendagent** | `backend.agent.md` | Implements FastAPI backend — `backend/` only | `planned/plan.md` |
+| **ui-uxagent** | `uiux.agent.md` | Implements frontend UI changes — `frontend/` only | `planned/plan.md` |
+| **TestingAgent** | `testing.agent.md` | Writes unit tests for backend + frontend — no app code changes | `planned/plan.md` |
+
+### `mainworkflow.yml` — issue fan-out
+
+Trigger conditions:
+- A pull request is **merged** (not just closed) by a non-automation actor whose branch does not start with `copilot/`
+- Manual `workflow_dispatch`
+- PRs labeled `skip-uiux-automation` are excluded
+
+On trigger: reads `planning.md` from the target branch, ensures the `copilot` label exists, checks that `copilot` can be assigned, deduplicates against open issues, then creates (up to) three issues — **UI/UX changes**, **Backend changes**, **Testing changes** — each labeled `copilot` and assigned to the Copilot coding agent.
 
 ---
 
@@ -333,11 +380,14 @@ Shared instruction files (`agent-behavior`, `agent-safety`, `security-and-owasp`
 ```
 ey-attg-sdlc-wizard/
 ├── .github/
+│   ├── agents/
+│   │   ├── planning.agent.md    # planningAgent — reads GitHub Issue → creates planned/plan.md
+│   │   ├── backend.agent.md     # Backendagent  — FastAPI backend implementation (backend/ only)
+│   │   ├── uiux.agent.md        # ui-uxagent    — frontend UI changes (frontend/ only)
+│   │   └── testing.agent.md     # TestingAgent  — unit tests for backend + frontend
 │   └── workflows/
-│       ├── deploy.yml                        # GitHub Pages CI/CD
-│       ├── greenfield-coding.lock.yml/.md    # Copilot Coding Agent
-│       ├── greenfield-testing.lock.yml/.md   # Copilot Testing Agent
-│       └── greenfield-planning.lock.yml/.md  # Planning workflow (workflow_dispatch / PR re-run)
+│       ├── deploy.yml           # GitHub Pages CI/CD
+│       └── mainworkflow.yml     # Issue fan-out: merge → create UI/UX + Backend + Testing issues
 ├── scripts/
 │   ├── bundle-kit.js        # Bundles sdd-kit/ → src/data/kit-files.json
 │   ├── generate-docs.mjs    # Generates Word deployment guide
