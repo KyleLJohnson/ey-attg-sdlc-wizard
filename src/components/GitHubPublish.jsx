@@ -776,7 +776,7 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
             {issueUrl ? (
               <a href={issueUrl} target="_blank" rel="noopener noreferrer"
                 className="btn btn-secondary" style={{ display: 'inline-flex', gap: 8 }}>
-                View SDLC issue (workflow running) →
+                View SDLC issue →
               </a>
             ) : (
               <button
@@ -832,7 +832,7 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
               className="btn btn-secondary"
               style={{ display: 'inline-flex', gap: 8 }}
             >
-              View project issue (SDLC workflow running) →
+              View project issue →
             </a>
           )}
         </div>
