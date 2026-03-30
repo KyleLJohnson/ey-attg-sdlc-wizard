@@ -55,7 +55,7 @@ function ghFetch(path, token, opts = {}) {
 }
 
 // ── GitHubPublish ─────────────────────────────────────────────────────────────
-export default function GitHubPublish({ files, projectName, mode = 'greenfield', existingRepo = '', wizardData = {} }) {
+export default function GitHubPublish({ files, projectName, mode = 'greenfield', existingRepos = [], wizardData = {} }) {
   // Auth
   const [pat, setPat]         = useState('');
   const [showPat, setShowPat] = useState(false);
@@ -67,19 +67,122 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
   const [repoDesc, setRepoDesc]       = useState('');
   const [repoPrivate, setRepoPrivate] = useState(false);
 
-  // Brownfield PR config
-  const [prBranch, setPrBranch] = useState('sdlc-kit-setup');
-
   // Process
   const [phase, setPhase]           = useState('idle');  // idle | verifying | pushing | done | error
   const [progress, setProgress]     = useState('');
   const [repoUrl, setRepoUrl]       = useState('');
-  const [prUrl, setPrUrl]           = useState('');
+  const [prUrls, setPrUrls]         = useState([]);
   const [issueUrl, setIssueUrl]     = useState('');
   const [error, setError]           = useState('');
 
   const fileCount = files ? Object.keys(files).length : 0;
-  const targetRepo = parseRepo(existingRepo);   // 'owner/repo' or null
+  const targetRepos = (existingRepos || []).map(r => parseRepo(r)).filter(Boolean);
+
+  // ── Option A: path-pattern file routing ─────────────────────────────────
+  // Always send all files to every repo; routing is applied when there are
+  // multiple repos so each repo only receives its relevant subset.
+  function routeFilesToRepo(allFiles, repoIndex, totalRepos) {
+    if (totalRepos === 1) return allFiles;
+    const SHARED_PREFIXES = ['context/', '.github/', 'sdd-kit/', '.vscode/'];
+    const REPO2_PREFIXES  = ['src/', 'app/', 'frontend/', 'client/', 'web/', 'public/'];
+    const REPO3_PREFIXES  = ['api/', 'server/', 'backend/', 'services/'];
+    const result = {};
+    for (const [path, content] of Object.entries(allFiles)) {
+      const isShared = SHARED_PREFIXES.some(p => path.startsWith(p)) || !path.includes('/');
+      const isRepo2  = REPO2_PREFIXES.some(p => path.startsWith(p));
+      const isRepo3  = REPO3_PREFIXES.some(p => path.startsWith(p));
+      if (repoIndex === 0) {
+        // Repo 1: shared + anything not claimed by repo 2/3
+        if (isShared || (!isRepo2 && !isRepo3)) result[path] = content;
+      } else if (repoIndex === 1) {
+        // Repo 2: repo2-specific + shared
+        if (isShared || isRepo2) result[path] = content;
+      } else {
+        // Repo 3: repo3-specific + shared
+        if (isShared || isRepo3) result[path] = content;
+      }
+    }
+    return result;
+  }
+
+  // ── Option B: AI-driven routing via GitHub Models API ────────────────────
+  // Sends the feature spec + repo list to gpt-4o-mini and asks it to return
+  // a JSON routing map: { "path": repoIndex (0|1|2), ... }
+  // Returns the map on success, or null on any failure (falls back to Option A).
+  async function getAiRoutingMap(allFiles, repos, featureSpec) {
+    try {
+      const filePaths = Object.keys(allFiles);
+      const repoDescriptions = repos.map((r, i) => `Repository ${i + 1}: ${r}`).join('\n');
+      const prompt = [
+        'You are a software architect. Given a feature specification and a list of repositories in a multi-repo application, determine which repository each file path should be placed in.',
+        '',
+        '## Repositories',
+        repoDescriptions,
+        '',
+        '## Feature Specification',
+        featureSpec,
+        '',
+        '## File Paths to Route',
+        filePaths.join('\n'),
+        '',
+        'Respond ONLY with a valid JSON object mapping each file path to a repository index (0, 1, or 2). Use 0 for Repository 1, 1 for Repository 2, 2 for Repository 3.',
+        'Shared infrastructure files (context/, .github/, sdd-kit/, .vscode/) should always map to ALL repositories — represent this as -1.',
+        'Example: { "context/project.md": -1, "src/App.tsx": 1, "api/server.js": 2 }',
+        'Do not include any explanation, only the JSON object.',
+      ].join('\n');
+
+      const res = await fetch('https://models.inference.ai.azure.com/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: 4096,
+          temperature: 0,
+        }),
+      });
+
+      if (!res.ok) return null;
+      const data = await res.json();
+      const raw = data?.choices?.[0]?.message?.content?.trim();
+      if (!raw) return null;
+
+      // Extract JSON even if wrapped in a code block
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) return null;
+      const routing = JSON.parse(jsonMatch[0]);
+
+      // Validate: must be an object with string keys and numeric values
+      if (typeof routing !== 'object' || Array.isArray(routing)) return null;
+      for (const val of Object.values(routing)) {
+        if (typeof val !== 'number' || val < -1 || val > 2) return null;
+      }
+      return routing;
+    } catch {
+      return null;
+    }
+  }
+
+  // Apply an AI routing map to produce the file set for a given repo index.
+  // Files with index -1 (shared) go to all repos.
+  // Falls back to Option A for any file not present in the map.
+  function applyAiRouting(allFiles, routingMap, repoIndex, totalRepos) {
+    const result = {};
+    for (const [path, content] of Object.entries(allFiles)) {
+      const mapped = routingMap[path];
+      if (mapped === undefined) {
+        // Not in map — fall back to Option A for this file
+        const optionAResult = routeFilesToRepo({ [path]: content }, repoIndex, totalRepos);
+        if (optionAResult[path] !== undefined) result[path] = content;
+      } else if (mapped === -1 || mapped === repoIndex) {
+        result[path] = content;
+      }
+    }
+    return result;
+  }
 
   // ── Verify PAT + fetch user ───────────────────────────────────────────────
   async function connectWithPat() {
@@ -112,14 +215,304 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
     setError('');
   }
 
-  // ── Create PR on existing repo (brownfield) ──────────────────────────────
-  // Same multi-batch strategy as createAndPush: nested-subtree commits chained
-  // via intermediate temporary refs, then PR branch pointed at final commit.
+  // ── Create PRs on all target repos (brownfield) ─────────────────────────
   async function createPr() {
-    if (!token || !targetRepo) return;
+    if (!token || !targetRepos.length) return;
     setPhase('pushing');
     setError('');
-    const prBranchName = prBranch.trim() || 'sdlc-kit-setup';
+    const prBranchName = `${slugify(projectName || 'project')}_sdlc_wizard`;
+    const collectedPrUrls = [];
+
+    // ── Option B: AI routing ─────────────────────────────────────────────
+    let aiRoutingMap = null;
+    const featureSpec = wizardData?.project?.featureSpecContent?.trim() || '';
+    if (targetRepos.length > 1 && featureSpec) {
+      setProgress('Analyzing feature spec for smart repo routing…');
+      aiRoutingMap = await getAiRoutingMap(files, targetRepos, featureSpec);
+    }
+
+    try {
+      for (let repoIndex = 0; repoIndex < targetRepos.length; repoIndex++) {
+        const targetRepo = targetRepos[repoIndex];
+        const repoFiles = aiRoutingMap
+          ? applyAiRouting(files, aiRoutingMap, repoIndex, targetRepos.length)
+          : routeFilesToRepo(files, repoIndex, targetRepos.length);
+        const repoLabel = targetRepos.length > 1 ? ` (${repoIndex + 1}/${targetRepos.length}: ${targetRepo})` : ` (${targetRepo})`;
+
+        // Step 1: Verify access + get default branch
+        setProgress(`Verifying repository access${repoLabel}…`);
+        const repoRes = await ghFetch(`/repos/${targetRepo}`, token);
+        if (repoRes.status === 404) throw new Error(`Repository "${targetRepo}" not found — check the name and that the token has access.`);
+        if (!repoRes.ok) throw new Error(`Could not access repository: HTTP ${repoRes.status}`);
+        const repoData = await repoRes.json();
+        const defaultBranch = repoData.default_branch || 'main';
+
+        // Step 2: Get latest commit SHA on default branch
+        setProgress(`Reading ${defaultBranch} branch${repoLabel}…`);
+        const refRes = await ghFetch(`/repos/${targetRepo}/git/ref/heads/${defaultBranch}`, token);
+        if (!refRes.ok) {
+          const e = await refRes.json().catch(() => ({}));
+          throw new Error(`Could not read branch "${defaultBranch}": ${e.message || refRes.status}`);
+        }
+        const refData = await refRes.json();
+        const baseCommitSha = refData.object.sha;
+
+        // Step 3: Get base tree SHA from that commit
+        const commitRes = await ghFetch(`/repos/${targetRepo}/git/commits/${baseCommitSha}`, token);
+        if (!commitRes.ok) throw new Error('Could not read latest commit.');
+        const baseTreeSha = (await commitRes.json()).tree.sha;
+
+        // Step 4: Build & commit files in batches using nested subtrees
+        const allEntries   = Object.entries(repoFiles);
+        const nonWfEntries = allEntries.filter(([p]) => !p.includes('.github/workflows/'));
+        const wfEntries    = allEntries.filter(([p]) =>  p.includes('.github/workflows/'));
+
+        async function postLeafTree(items) {
+          const res = await ghFetch(`/repos/${targetRepo}/git/trees`, token, {
+            method: 'POST', body: { tree: items },
+          });
+          if (!res.ok) {
+            const e = await res.json().catch(() => ({}));
+            throw new Error(`Could not create sub-tree (HTTP ${res.status}): ${e.message || 'unknown'}`);
+          }
+          return (await res.json()).sha;
+        }
+        async function buildRootItemsRecurse(fileEntries) {
+          const dirMap = {};
+          const blobs = [];
+          for (const [fp, content] of fileEntries) {
+            const slash = fp.indexOf('/');
+            if (slash === -1) blobs.push({ path: fp, mode: '100644', type: 'blob', content });
+            else { const dir = fp.slice(0, slash); (dirMap[dir] ??= []).push([fp.slice(slash + 1), content]); }
+          }
+          const items = [...blobs];
+          for (const [dir, children] of Object.entries(dirMap)) {
+            const subItems = await buildRootItemsRecurse(children);
+            items.push({ path: dir, mode: '040000', type: 'tree', sha: await postLeafTree(subItems) });
+          }
+          return items;
+        }
+
+        const tempBranchRes = await ghFetch(`/repos/${targetRepo}/git/refs`, token, {
+          method: 'POST',
+          body: { ref: `refs/heads/${prBranchName}`, sha: baseCommitSha },
+        });
+        if (!tempBranchRes.ok) {
+          const e = await tempBranchRes.json().catch(() => ({}));
+          const msg = e.errors?.[0]?.message || e.message || tempBranchRes.status;
+          throw new Error(`Could not create branch "${prBranchName}" on ${targetRepo}: ${msg}`);
+        }
+
+        let prevCommitSha = baseCommitSha;
+        let prevTreeSha   = baseTreeSha;
+        const BATCH = 85;
+        const totalBatches = Math.ceil(nonWfEntries.length / BATCH) + (wfEntries.length > 0 ? 1 : 0);
+        let batchNum = 0;
+
+        for (let i = 0; i < nonWfEntries.length; i += BATCH) {
+          batchNum++;
+          const batch = nonWfEntries.slice(i, i + BATCH);
+          setProgress(`Pushing files to ${targetRepo}… (batch ${batchNum}/${totalBatches})`);
+
+          const rootItems = await buildRootItemsRecurse(batch);
+          const treeRes = await ghFetch(`/repos/${targetRepo}/git/trees`, token, {
+            method: 'POST',
+            body: { tree: rootItems, base_tree: prevTreeSha },
+          });
+          if (!treeRes.ok) {
+            const e = await treeRes.json().catch(() => ({}));
+            throw new Error(`Could not create git tree (batch ${batchNum}, HTTP ${treeRes.status}): ${e.message || 'unknown'}`);
+          }
+          const treeSha = (await treeRes.json()).sha;
+
+          const msg = batchNum === 1
+            ? 'chore: add SpecDD Starter Kit\n\nGenerated by the EY ATTG SDLC Wizard.'
+            : `chore: add SpecDD Starter Kit files (part ${batchNum})`;
+          const cRes = await ghFetch(`/repos/${targetRepo}/git/commits`, token, {
+            method: 'POST',
+            body: { message: msg, tree: treeSha, parents: [prevCommitSha] },
+          });
+          if (!cRes.ok) {
+            const e = await cRes.json().catch(() => ({}));
+            throw new Error(`Could not create commit (batch ${batchNum}): ${e.message || cRes.status}`);
+          }
+          const newCommit = await cRes.json();
+
+          const pRes = await ghFetch(
+            `/repos/${targetRepo}/git/refs/heads/${prBranchName}`, token, {
+              method: 'PATCH', body: { sha: newCommit.sha, force: false },
+            });
+          if (!pRes.ok) {
+            const e = await pRes.json().catch(() => ({}));
+            throw new Error(`Could not update branch (batch ${batchNum}): ${e.message || pRes.status}`);
+          }
+          prevCommitSha = newCommit.sha;
+          prevTreeSha   = treeSha;
+          if (i + BATCH < nonWfEntries.length || wfEntries.length > 0) {
+            await new Promise(r => setTimeout(r, 800));
+          }
+        }
+
+        // Workflow files batch
+        if (wfEntries.length > 0) {
+          batchNum++;
+          setProgress(`Pushing workflow files to ${targetRepo}… (batch ${batchNum}/${totalBatches})`);
+
+          const prevTreeListRes = await ghFetch(`/repos/${targetRepo}/git/trees/${prevTreeSha}`, token);
+          const prevTreeList = prevTreeListRes.ok ? await prevTreeListRes.json() : null;
+          const existingGithubSha = prevTreeList?.tree?.find(e => e.path === '.github')?.sha ?? null;
+
+          const wfBlobItems = wfEntries.map(([fp, content]) => ({
+            path: fp.split('/').pop(), mode: '100644', type: 'blob', content,
+          }));
+          const wfSubSha = await postLeafTree(wfBlobItems);
+
+          const githubTreeBody = existingGithubSha
+            ? { base_tree: existingGithubSha, tree: [{ path: 'workflows', mode: '040000', type: 'tree', sha: wfSubSha }] }
+            : { tree: [{ path: 'workflows', mode: '040000', type: 'tree', sha: wfSubSha }] };
+          const gRes = await ghFetch(`/repos/${targetRepo}/git/trees`, token, {
+            method: 'POST', body: githubTreeBody,
+          });
+          if (!gRes.ok) {
+            const e = await gRes.json().catch(() => ({}));
+            throw new Error(`Could not create .github tree (HTTP ${gRes.status}): ${e.message || 'unknown'}`);
+          }
+          const newGithubSha = (await gRes.json()).sha;
+
+          const rRes = await ghFetch(`/repos/${targetRepo}/git/trees`, token, {
+            method: 'POST',
+            body: { base_tree: prevTreeSha, tree: [{ path: '.github', mode: '040000', type: 'tree', sha: newGithubSha }] },
+          });
+          if (!rRes.ok) {
+            const e = await rRes.json().catch(() => ({}));
+            throw new Error(`Could not create root tree for workflows (HTTP ${rRes.status}): ${e.message || 'unknown'}`);
+          }
+          const wfTreeSha = (await rRes.json()).sha;
+
+          const wcRes = await ghFetch(`/repos/${targetRepo}/git/commits`, token, {
+            method: 'POST',
+            body: { message: 'chore: add GitHub Actions workflow files', tree: wfTreeSha, parents: [prevCommitSha] },
+          });
+          if (!wcRes.ok) {
+            const e = await wcRes.json().catch(() => ({}));
+            throw new Error(`Could not create workflow commit: ${e.message || wcRes.status}`);
+          }
+          const wfCommit = await wcRes.json();
+
+          const wpRes = await ghFetch(
+            `/repos/${targetRepo}/git/refs/heads/${prBranchName}`, token, {
+              method: 'PATCH', body: { sha: wfCommit.sha, force: false },
+            });
+          if (!wpRes.ok) {
+            const e = await wpRes.json().catch(() => ({}));
+            const msg = wpRes.status === 404
+              ? 'Token missing the "workflow" scope — regenerate your PAT with both repo and workflow selected.'
+              : (e.message || wpRes.status);
+            throw new Error(`Could not push workflow files: ${msg}`);
+          }
+        }
+
+        // Open PR on this repo
+        setProgress(`Opening pull request on ${targetRepo}…`);
+        const prRes = await ghFetch(`/repos/${targetRepo}/pulls`, token, {
+          method: 'POST',
+          body: {
+            title: 'chore: add SpecDD Starter Kit',
+            body: [
+              '## SpecDD Starter Kit',
+              '',
+              `This PR adds the EY ATTG SDLC Starter Kit to **${projectName || targetRepo}**.`,
+              '',
+              '### What\'s included',
+              '- `context/project.md` — project identity & personas',
+              '- `context/tech-stack.md` — approved technologies',
+              '- `context/constitution.md` — governing principles',
+              '- `.github/copilot-instructions.md` — AI agent context (auto-loaded by Copilot)',
+              '- All 80+ sdd-kit instruction, template, and agent files',
+              '',
+              '---',
+              '*Generated by the EY ATTG SDLC Wizard.*',
+            ].join('\n'),
+            head: prBranchName,
+            base: defaultBranch,
+          },
+        });
+        if (!prRes.ok) {
+          const e = await prRes.json().catch(() => ({}));
+          throw new Error(`Could not create pull request on ${targetRepo}: ${e.message || prRes.status}`);
+        }
+        const pr = await prRes.json();
+        collectedPrUrls.push({ repo: targetRepo, url: pr.html_url });
+
+        // Pause between repos to avoid rate limiting
+        if (repoIndex < targetRepos.length - 1) {
+          await new Promise(r => setTimeout(r, 1000));
+        }
+      }
+
+      setPrUrls(collectedPrUrls);
+
+      // Create SDLC label + issue on Repo 1 only
+      setProgress('Creating SDLC label and issue…');
+      try {
+        const primaryRepo = targetRepos[0];
+        await ghFetch(`/repos/${primaryRepo}/labels`, token, {
+          method: 'POST',
+          body: { name: 'SDLC', color: '0075ca', description: 'Tracks SDLC project issues' },
+        });
+        const p = wizardData?.project || {};
+        const ts = wizardData?.techStack || {};
+        const ag = wizardData?.agent || {};
+        const mc = wizardData?.mcp || {};
+        const issueBody = [
+          '## Project Summary',
+          '',
+          `**Name:** ${projectName || primaryRepo}`,
+          p.description ? `**Description:** ${p.description}` : '',
+          p.problemStatement ? `**Problem Statement:** ${p.problemStatement}` : '',
+          p.userOutcome ? `**User Outcome:** ${p.userOutcome}` : '',
+          p.businessOutcome ? `**Business Outcome:** ${p.businessOutcome}` : '',
+          '',
+          '## Repositories',
+          ...targetRepos.map((r, i) => `- **Repository ${i + 1}:** ${r}`),
+          '',
+          '## Tech Stack',
+          ts.languages?.length ? `**Languages:** ${ts.languages.join(', ')}` : '',
+          ts.frontend ? `**Frontend:** ${ts.frontend}` : '',
+          ts.backend ? `**Backend:** ${ts.backend}` : '',
+          ts.database ? `**Database:** ${ts.database}` : '',
+          ts.infrastructure?.length ? `**Infrastructure:** ${ts.infrastructure.join(', ')}` : '',
+          '',
+          '## Agent & LLM',
+          ag.primary ? `**Primary Agent:** ${ag.primary}` : '',
+          ag.model ? `**Model:** ${ag.model}` : '',
+          mc.tools?.length ? `**MCP Tools:** ${mc.tools.join(', ')}` : '',
+          '',
+          '---',
+          '*Generated by the EY ATTG SDLC Wizard.*',
+        ].filter(line => line !== '').join('\n');
+        const issueRes = await ghFetch(`/repos/${primaryRepo}/issues`, token, {
+          method: 'POST',
+          body: {
+            title: `Project: ${projectName || primaryRepo}`,
+            body: issueBody,
+            labels: ['SDLC'],
+          },
+        });
+        if (issueRes.ok) {
+          const issue = await issueRes.json();
+          setIssueUrl(issue.html_url);
+        }
+      } catch {
+        // Issue creation is best-effort; don't block success
+      }
+
+      setPhase('done');
+    } catch (err) {
+      setError(err.message || 'PR creation failed. Please try again.');
+      setPhase('error');
+    }
+  }
 
     try {
       // Step 1: Verify access + get default branch
@@ -754,19 +1147,19 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
       return (
         <div className="gh-success">
           <div className="gh-success-check">✓</div>
-          <h3>Pull request created!</h3>
+          <h3>Pull request{prUrls.length > 1 ? 's' : ''} created!</h3>
           <p>
             Your SpecDD Starter Kit has been added as a pull request on{' '}
-            <strong>{targetRepo}</strong>. Review the diff and merge when ready.
+            <strong>{targetRepos.join(', ')}</strong>. Review the diff and merge when ready.
           </p>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 24 }}>
-            {prUrl && (
-              <a href={prUrl} target="_blank" rel="noopener noreferrer"
+            {prUrls.map(({ repo, url }) => (
+              <a key={url} href={url} target="_blank" rel="noopener noreferrer"
                 className="btn btn-github" style={{ display: 'inline-flex', gap: 8 }}>
                 <GHIcon />
-                Open pull request →
+                Open PR{targetRepos.length > 1 ? ` (${repo})` : ''} →
               </a>
-            )}
+            ))}
             {issueUrl && (
               <a href={issueUrl} target="_blank" rel="noopener noreferrer"
                 className="btn btn-secondary" style={{ display: 'inline-flex', gap: 8 }}>
@@ -778,7 +1171,7 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
           <div className="next-steps">
             <strong>What to do next:</strong>
             <ol>
-              <li>Review and merge the pull request into your default branch.</li>
+              <li>Review and merge the pull request{prUrls.length > 1 ? 's' : ''} into your default branch.</li>
               <li>Pull the latest in VS Code. Copilot picks up <code>.github/copilot-instructions.md</code> automatically.</li>
               <li>Review <code>context/constitution.md</code> and commit any edits.</li>
               {files && Object.keys(files).includes('.vscode/mcp.json') && (
@@ -925,39 +1318,29 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
       {/* Repo settings — brownfield: PR config; greenfield: new repo config */}
       {mode === 'brownfield' ? (
         <div className="gh-repo-settings">
-          {/* Read-only target repo */}
           <div className="form-group">
-            <label>Target Repository</label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontFamily: 'monospace', fontSize: 14, color: 'var(--text-primary)' }}>
-                {targetRepo || existingRepo}
-              </span>
-              <a
-                href={`https://github.com/${targetRepo || existingRepo}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ fontSize: 12, color: 'var(--text-muted)' }}
-              >
-                view on GitHub →
-              </a>
-            </div>
-            <span className="label-hint">Kit files will be added as a pull request — nothing merged without your review</span>
+            <label>Target {targetRepos.length > 1 ? 'Repositories' : 'Repository'}</label>
+            {targetRepos.map((repo, i) => (
+              <div key={repo} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: i < targetRepos.length - 1 ? 6 : 0 }}>
+                <span style={{ fontFamily: 'monospace', fontSize: 14, color: 'var(--text-primary)' }}>
+                  {repo}
+                </span>
+                <a
+                  href={`https://github.com/${repo}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ fontSize: 12, color: 'var(--text-muted)' }}
+                >
+                  view →
+                </a>
+              </div>
+            ))}
+            <span className="label-hint">Kit files will be added as a pull request per repository — nothing merged without your review</span>
           </div>
-
-          {/* Editable PR branch name */}
           <div className="form-group">
-            <label htmlFor="gh-pr-branch">
-              PR branch name <span className="badge badge-optional">editable</span>
-            </label>
-            <input
-              id="gh-pr-branch"
-              type="text"
-              value={prBranch}
-              onChange={e => setPrBranch(e.target.value.toLowerCase().replace(/[^a-z0-9-_.]/g, '-'))}
-              placeholder="sdlc-kit-setup"
-              disabled={phase === 'pushing'}
-            />
-            <span className="label-hint">Branch must not already exist in the repo</span>
+            <label>PR branch name</label>
+            <code style={{ fontSize: 13 }}>{`${slugify(projectName || 'project')}_sdlc_wizard`}</code>
+            <span className="label-hint">Auto-generated from your project name</span>
           </div>
         </div>
       ) : (
@@ -1028,10 +1411,10 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
           className="btn btn-github"
           style={{ marginTop: 16 }}
           onClick={createPr}
-          disabled={!targetRepo || !prBranch.trim()}
+          disabled={!targetRepos.length}
         >
           <GHIcon />
-          Create pull request ({fileCount} files)
+          Create pull request{targetRepos.length > 1 ? 's' : ''} ({fileCount} files)
         </button>
       ) : (
         <button

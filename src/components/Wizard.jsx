@@ -41,7 +41,7 @@ const INITIAL = {
     personas: [{ id: 1, name: '', description: '', goals: '', painPoints: '' }],
     userOutcome: '', businessOutcome: '', businessConstraints: '', technicalConstraints: '',
     featureSpecMode: 'paste', featureSpecContent: '', featureSpecUrl: '', featureSpecFileName: '',
-    existingRepo: '',   // brownfield only: 'owner/repo' or full GitHub URL
+    repos: ['', '', ''],   // brownfield only: up to 3 'owner/repo' strings
   },
   techStack: {
     languages: [], frontend: '', frontendOther: '',
@@ -84,8 +84,8 @@ export default function Wizard() {
     if (currentStep === 1) {
       if (!d.project.name?.trim())        errs.name        = 'Project name is required';
       if (!d.project.description?.trim()) errs.description = 'One-sentence description is required';
-      if (d.mode === 'brownfield' && !d.project.existingRepo?.trim())
-        errs.existingRepo = 'Existing repository is required for brownfield mode';
+      if (d.mode === 'brownfield' && !d.project.repos[0]?.trim())
+        errs.repos0 = 'At least one repository is required for brownfield mode';
     }
     if (currentStep === 3) {
       if (d.governance.levels.includes('bu') && !d.governance.buName?.trim())
@@ -174,7 +174,7 @@ export default function Wizard() {
               files={files}
               projectName={data.project.name}
               mode={data.mode}
-              existingRepo={data.project.existingRepo}
+              existingRepos={data.project.repos}
               wizardData={data}
             />
           )}
@@ -319,30 +319,36 @@ function ProjectStep({ data, mode, update, errors = {}, clearError = () => {} })
 
         {mode === 'brownfield' && (
           <div className="form-group">
-            <label htmlFor="proj-existing-repo">
-              Existing Repository <span className="badge badge-required">required</span>
-            </label>
-            <input
-              id="proj-existing-repo"
-              type="text"
-              className={errors.existingRepo ? 'invalid' : ''}
-              value={data.existingRepo || ''}
-              onChange={e => {
-                // Normalise full URL to owner/repo
-                let val = e.target.value.trim();
-                const match = val.match(/github\.com\/([^\/]+\/[^\/\s?#]+)/);
-                if (match) val = match[1].replace(/\.git$/, '');
-                update({ existingRepo: val });
-                clearError('existingRepo');
-              }}
-              placeholder="owner/repo or https://github.com/owner/repo"
-              autoComplete="off"
-              spellCheck={false}
-            />
-            {errors.existingRepo
-              ? <span className="field-error">{errors.existingRepo}</span>
-              : <span className="label-hint">The SDLC kit will be added as a pull request on this repo</span>
-            }
+            {[0, 1, 2].map(i => (
+              <div key={i} style={{ marginBottom: i < 2 ? 10 : 0 }}>
+                <label htmlFor={`proj-repo-${i}`}>
+                  Repository {i + 1}{' '}
+                  {i === 0
+                    ? <span className="badge badge-required">required</span>
+                    : <span className="badge badge-optional">optional</span>}
+                </label>
+                <input
+                  id={`proj-repo-${i}`}
+                  type="text"
+                  className={i === 0 && errors.repos0 ? 'invalid' : ''}
+                  value={data.repos?.[i] || ''}
+                  onChange={e => {
+                    let val = e.target.value.trim();
+                    const match = val.match(/github\.com\/([^/]+\/[^/\s?#]+)/);
+                    if (match) val = match[1].replace(/\.git$/, '');
+                    const repos = [...(data.repos || ['', '', ''])];
+                    repos[i] = val;
+                    update({ repos });
+                    if (i === 0) clearError('repos0');
+                  }}
+                  placeholder="owner/repo or https://github.com/owner/repo"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                {i === 0 && errors.repos0 && <span className="field-error">{errors.repos0}</span>}
+                {i === 0 && !errors.repos0 && <span className="label-hint">The SDLC kit will be added as a pull request on each repository entered</span>}
+              </div>
+            ))}
           </div>
         )}
 
@@ -992,15 +998,16 @@ function PreviewStep({ files, activeTab, onTabChange, copied, onCopy }) {
 }
 
 // ─── Step 8: Publish to GitHub ────────────────────────────────────────────────
-function PublishStep({ files, projectName, mode, existingRepo, wizardData }) {
+function PublishStep({ files, projectName, mode, existingRepos = [], wizardData }) {
   const fileCount = files ? Object.keys(files).length : 0;
+  const filledRepos = existingRepos.filter(r => r?.trim());
   return (
     <div>
       <div className="step-header">
         <h1>Publish to GitHub</h1>
         <p>
           {mode === 'brownfield'
-            ? <>Enter a Personal Access Token to open a pull request on <strong>{existingRepo || 'your existing repo'}</strong> with all {fileCount} kit files — nothing merged without your review.</>
+            ? <>Enter a Personal Access Token to open a pull request on <strong>{filledRepos.join(', ') || 'your existing repo(s)'}</strong> with all {fileCount} kit files — nothing merged without your review.</>
             : <>Enter a Personal Access Token to create a new repository and push all {fileCount} files in a single initial commit.</>
           }
         </p>
@@ -1010,7 +1017,7 @@ function PublishStep({ files, projectName, mode, existingRepo, wizardData }) {
         files={files}
         projectName={projectName}
         mode={mode}
-        existingRepo={existingRepo}
+        existingRepos={existingRepos}
         wizardData={wizardData}
       />
     </div>

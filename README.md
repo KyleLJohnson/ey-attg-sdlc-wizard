@@ -62,7 +62,7 @@ A browser-based wizard that generates a fully configured [Spec-Driven Developmen
 | Multi-batch commit strategy | GitHub API enforces an undocumented ~114-unique-object-per-commit limit; files are split into ≤85-file batches |
 | Workflow files in final commit | `.github/workflows/` files require the `workflow` PAT scope; they are pushed in a dedicated last commit so scope errors surface clearly |
 | libsodium-wrappers (lazy) | Required by the GitHub Secrets API to encrypt PAT values; dynamically imported to keep the initial bundle lean |
-| Two separate PATs | Classic `ghp_` for repo creation/push; fine-grained `github_pat_` stored as `COPILOT_GITHUB_TOKEN` for the Copilot Coding Agent |
+| Single classic PAT | `ghp_` token is the only credential required — used for repo creation, push, and API operations |
 
 ---
 
@@ -93,17 +93,7 @@ Developer commits docs/plan.md
           Production code
 ```
 
-`greenfield-from-centralrepo.md` provides an alternative trigger for teams using a central spec repository pattern.
-
-### The `COPILOT_GITHUB_TOKEN` Secret
-
-The wizard automatically creates this secret in every new repository using the fine-grained PAT you provide on the Publish step. It must be a **fine-grained** PAT (`github_pat_...`) — GitHub explicitly rejects classic PATs for Copilot Coding Agent authentication.
-
-Required permissions on the target repository:
-
-- **Contents** — Read & Write
-- **Issues** — Read & Write
-- **Pull requests** — Read & Write
+`greenfield-planning.md` provides an alternative trigger for teams using a central spec repository pattern. It is activated by `workflow_dispatch` or a re-run via pull request — it does **not** auto-start when an issue is labeled.
 
 ---
 
@@ -125,7 +115,6 @@ Required permissions on the target repository:
 |---|---|
 | GitHub account | To create / push repositories |
 | Classic PAT (`ghp_...`) | Scopes: `repo` + `workflow` |
-| Fine-grained PAT (`github_pat_...`) | Stored as `COPILOT_GITHUB_TOKEN`; needs Contents, Issues, Pull requests read/write |
 | GitHub Copilot access | Required for the Coding Agent workflows to execute |
 | Modern browser | Chrome, Edge, Firefox, or Safari |
 
@@ -274,23 +263,35 @@ git push
 
 1. Complete all 9 wizard steps
 2. On the **Publish** step, paste your **classic PAT** (`ghp_...`) and click **Connect**
-3. Enter a repository name and paste your **fine-grained PAT** into the **Copilot token** field
-4. Click **Create repository & push N files**
+3. Enter a repository name and click **Create repository & push N files**
 
 The wizard will:
 - Create the repository
 - Push all kit files in multi-batch commits
-- Store `COPILOT_GITHUB_TOKEN` as an Actions secret
-- Create the SDLC issue that kicks off the planning workflow
+- Automatically create the SDLC issue that kicks off the planning workflow
 
 ### Brownfield (existing repository)
 
+Brownfield mode supports **up to 3 target repositories** for multi-repo projects.
+
 1. On step 0, choose **Brownfield**
 2. Complete the wizard steps with your project's existing context
-3. On the **Publish** step, paste your classic PAT and the target repository name
-4. Click **Create pull request**
+3. On the **Publish** step, paste your classic PAT and click **Connect**
+4. Enter **Repo 1** (required) and optionally **Repo 2** and **Repo 3** in `owner/repo` format
+5. Click **Create pull request**
 
-> After merging the PR, manually add the `COPILOT_GITHUB_TOKEN` secret via **Settings → Secrets → Actions** in the target repository.
+The wizard will:
+- Open one PR per repository, each on an auto-named branch `{project-name}_sdlc_wizard`
+- Route kit files to the appropriate repo using **path-prefix routing (Option A)**
+- If a feature spec was provided in the wizard, upgrade to **AI-driven routing (Option B)** — the GitHub Models API analyzes the spec to decide which files belong in which repo, falling back to Option A silently if the call fails
+- Automatically create the SDLC issue on Repo 1, listing all target repos
+
+#### Multi-repo file routing
+
+| Strategy | When active | How it works |
+|---|---|---|
+| **Option A** — path-prefix | Always (default) | `src/`, `app/`, `frontend/` → Repo 2; `api/`, `server/`, `backend/` → Repo 3; shared infrastructure (`context/`, `.github/`, `sdd-kit/`) → all repos |
+| **Option B** — AI-driven | 2+ repos **and** a feature spec is present | Sends the spec + file list to `gpt-4o-mini` via GitHub Models API; the model returns a per-file routing map that overrides Option A (per-file fallback to Option A when not in map) |
 
 ---
 
@@ -301,16 +302,9 @@ The wizard will:
 - Format: `ghp_...`
 - Required scopes: `repo` (full) + `workflow`
 - Create at: `https://github.com/settings/tokens/new`
-- Used by the wizard to create repos, push files, and set secrets
+- Used by the wizard to create repos, push files, create PRs, and create issues
+- Also used (when Option B is active) to call the GitHub Models API for AI-assisted file routing
 - **Not stored** — browser memory only, cleared on disconnect
-
-### Fine-grained PAT — Copilot Coding Agent
-
-- Format: `github_pat_...`
-- Required permissions: Contents, Issues, Pull requests (Read & Write)
-- Create at: `https://github.com/settings/personal-access-tokens/new`
-- Stored as `COPILOT_GITHUB_TOKEN` Actions secret in the target repository
-- Classic PATs (`ghp_`) are **explicitly rejected** by GitHub Copilot Coding Agent workflows
 
 ---
 
@@ -323,7 +317,7 @@ ey-attg-sdlc-wizard/
 │       ├── deploy.yml                        # GitHub Pages CI/CD
 │       ├── greenfield-coding.lock.yml/.md    # Copilot Coding Agent
 │       ├── greenfield-testing.lock.yml/.md   # Copilot Testing Agent
-│       └── greenfield-from-centralrepo.lock.yml/.md
+│       └── greenfield-planning.lock.yml/.md  # Planning workflow (workflow_dispatch / PR re-run)
 ├── scripts/
 │   ├── bundle-kit.js        # Bundles sdd-kit/ → src/data/kit-files.json
 │   ├── generate-docs.mjs    # Generates Word deployment guide
