@@ -264,30 +264,11 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
   const targetRepos = (existingRepos || []).map(r => parseRepo(r)).filter(Boolean);
 
   // ── Option A: path-pattern file routing ─────────────────────────────────
-  // Always send all files to every repo; routing is applied when there are
-  // multiple repos so each repo only receives its relevant subset.
-  function routeFilesToRepo(allFiles, repoIndex, totalRepos) {
-    if (totalRepos === 1) return allFiles;
-    const SHARED_PREFIXES = ['context/', '.github/', 'sdd-kit/', '.vscode/'];
-    const REPO2_PREFIXES  = ['src/', 'app/', 'frontend/', 'client/', 'web/', 'public/'];
-    const REPO3_PREFIXES  = ['api/', 'server/', 'backend/', 'services/'];
-    const result = {};
-    for (const [path, content] of Object.entries(allFiles)) {
-      const isShared = SHARED_PREFIXES.some(p => path.startsWith(p)) || !path.includes('/');
-      const isRepo2  = REPO2_PREFIXES.some(p => path.startsWith(p));
-      const isRepo3  = REPO3_PREFIXES.some(p => path.startsWith(p));
-      if (repoIndex === 0) {
-        // Repo 1: shared + anything not claimed by repo 2/3
-        if (isShared || (!isRepo2 && !isRepo3)) result[path] = content;
-      } else if (repoIndex === 1) {
-        // Repo 2: repo2-specific + shared
-        if (isShared || isRepo2) result[path] = content;
-      } else {
-        // Repo 3: repo3-specific + shared
-        if (isShared || isRepo3) result[path] = content;
-      }
-    }
-    return result;
+  // All kit files live under shared prefixes (context/, .github/, sdd-kit/,
+  // .vscode/) so every repo receives all of them. Tech-role filtering via
+  // filterByRepoRole strips FE/BE-specific instruction files per repo.
+  function routeFilesToRepo(allFiles) {
+    return allFiles;
   }
 
   // ── Option B: AI-driven routing via GitHub Models API ────────────────────
@@ -353,15 +334,14 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
 
   // Apply an AI routing map to produce the file set for a given repo index.
   // Files with index -1 (shared) go to all repos.
-  // Falls back to Option A for any file not present in the map.
-  function applyAiRouting(allFiles, routingMap, repoIndex, totalRepos) {
+  // Falls back to Option A (all files) for any file not present in the map.
+  function applyAiRouting(allFiles, routingMap, repoIndex) {
     const result = {};
     for (const [path, content] of Object.entries(allFiles)) {
       const mapped = routingMap[path];
       if (mapped === undefined) {
-        // Not in map — fall back to Option A for this file
-        const optionAResult = routeFilesToRepo({ [path]: content }, repoIndex, totalRepos);
-        if (optionAResult[path] !== undefined) result[path] = content;
+        // Not in map — Option A sends everything, so include it
+        result[path] = content;
       } else if (mapped === -1 || mapped === repoIndex) {
         result[path] = content;
       }
@@ -420,8 +400,8 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
       for (let repoIndex = 0; repoIndex < targetRepos.length; repoIndex++) {
         const targetRepo = targetRepos[repoIndex];
         const routedFiles = aiRoutingMap
-          ? applyAiRouting(files, aiRoutingMap, repoIndex, targetRepos.length)
-          : routeFilesToRepo(files, repoIndex, targetRepos.length);
+          ? applyAiRouting(files, aiRoutingMap, repoIndex)
+          : routeFilesToRepo(files);
         // Remove instruction files that don't belong in this repo's tech role
         const repoFiles = filterByRepoRole(routedFiles, targetRepo, targetRepos.length);
         const repoLabel = targetRepos.length > 1 ? ` (${repoIndex + 1}/${targetRepos.length}: ${targetRepo})` : ` (${targetRepo})`;

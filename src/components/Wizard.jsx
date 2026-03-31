@@ -41,7 +41,7 @@ const INITIAL = {
     personas: [{ id: 1, name: '', description: '', goals: '', painPoints: '' }],
     userOutcome: '', businessOutcome: '', businessConstraints: '', technicalConstraints: '',
     featureSpecMode: 'paste', featureSpecContent: '', featureSpecUrl: '', featureSpecFileName: '',
-    repos: ['', '', ''],   // brownfield only: up to 3 'owner/repo' strings
+    repos: [''],   // brownfield only: dynamic list of 'owner/repo' strings
   },
   techStack: {
     languages: [], frontend: '', frontendOther: '',
@@ -319,24 +319,39 @@ function ProjectStep({ data, mode, update, errors = {}, clearError = () => {} })
 
         {mode === 'brownfield' && (
           <div className="form-group">
-            {[0, 1, 2].map(i => (
-              <div key={i} style={{ marginBottom: i < 2 ? 10 : 0 }}>
-                <label htmlFor={`proj-repo-${i}`}>
-                  Repository {i + 1}{' '}
-                  {i === 0
-                    ? <span className="badge badge-required">required</span>
-                    : <span className="badge badge-optional">optional</span>}
-                </label>
+            {(data.repos || ['']).map((repoVal, i) => (
+              <div key={i} style={{ marginBottom: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                  <label htmlFor={`proj-repo-${i}`} style={{ margin: 0 }}>
+                    Repository {i + 1}{' '}
+                    {i === 0
+                      ? <span className="badge badge-required">required</span>
+                      : <span className="badge badge-optional">optional</span>}
+                  </label>
+                  {i > 0 && (
+                    <button
+                      type="button"
+                      className="btn btn-danger-ghost"
+                      style={{ marginLeft: 'auto', padding: '2px 10px', fontSize: 12 }}
+                      onClick={() => {
+                        const repos = (data.repos || ['']).filter((_, idx) => idx !== i);
+                        update({ repos });
+                      }}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
                 <input
                   id={`proj-repo-${i}`}
                   type="text"
                   className={i === 0 && errors.repos0 ? 'invalid' : ''}
-                  value={data.repos?.[i] || ''}
+                  value={repoVal}
                   onChange={e => {
-                    let val = e.target.value.trim();
-                    const match = val.match(/github\.com\/([^/]+\/[^/\s?#]+)/);
+                    let val = e.target.value;
+                    const match = val.trim().match(/github\.com\/([^/]+\/[^/\s?#]+)/);
                     if (match) val = match[1].replace(/\.git$/, '');
-                    const repos = [...(data.repos || ['', '', ''])];
+                    const repos = [...(data.repos || [''])];
                     repos[i] = val;
                     update({ repos });
                     if (i === 0) clearError('repos0');
@@ -349,6 +364,21 @@ function ProjectStep({ data, mode, update, errors = {}, clearError = () => {} })
                 {i === 0 && !errors.repos0 && <span className="label-hint">The SDLC kit will be added as a pull request on each repository entered</span>}
               </div>
             ))}
+            {(() => {
+              const repos = data.repos || [''];
+              const canAdd = repos[repos.length - 1]?.trim().length > 0;
+              return (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ marginTop: 4, opacity: canAdd ? 1 : 0.45, cursor: canAdd ? 'pointer' : 'not-allowed' }}
+                  disabled={!canAdd}
+                  onClick={() => canAdd && update({ repos: [...repos, ''] })}
+                >
+                  + Add another repository
+                </button>
+              );
+            })()}
           </div>
         )}
 
