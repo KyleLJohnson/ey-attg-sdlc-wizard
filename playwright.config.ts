@@ -2,7 +2,7 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests',
-  timeout: 90_000,          // allow time for the GitHub API calls
+  timeout: 180_000,         // allow time for multi-batch GitHub API calls
   retries: 0,
   reporter: 'list',
   use: {
@@ -14,8 +14,11 @@ export default defineConfig({
   },
   webServer: {
     command: 'npm run dev',
+    env: {
+      PLAYWRIGHT: '1',
+    },
     url: 'http://localhost:4321',
-    reuseExistingServer: true,
+    reuseExistingServer: false,
     timeout: 30_000,
   },
 });

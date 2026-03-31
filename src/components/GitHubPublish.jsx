@@ -273,11 +273,12 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
 
   // ── Option B: AI-driven routing via GitHub Models API ────────────────────
   // Sends the feature spec + repo list to gpt-4o-mini and asks it to return
-  // a JSON routing map: { "path": repoIndex (0|1|2), ... }
+  // a JSON routing map: { "path": repoIndex, ... }
   // Returns the map on success, or null on any failure (falls back to Option A).
   async function getAiRoutingMap(allFiles, repos, featureSpec) {
     try {
       const filePaths = Object.keys(allFiles);
+      const maxRepoIndex = Math.max(0, repos.length - 1);
       const repoDescriptions = repos.map((r, i) => `Repository ${i + 1}: ${r}`).join('\n');
       const prompt = [
         'You are a software architect. Given a feature specification and a list of repositories in a multi-repo application, determine which repository each file path should be placed in.',
@@ -291,9 +292,9 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
         '## File Paths to Route',
         filePaths.join('\n'),
         '',
-        'Respond ONLY with a valid JSON object mapping each file path to a repository index (0, 1, or 2). Use 0 for Repository 1, 1 for Repository 2, 2 for Repository 3.',
+        `Respond ONLY with a valid JSON object mapping each file path to a repository index from 0 to ${maxRepoIndex}. Use 0 for Repository 1, 1 for Repository 2, and so on.`,
         'Shared infrastructure files (context/, .github/, sdd-kit/, .vscode/) should always map to ALL repositories — represent this as -1.',
-        'Example: { "context/project.md": -1, "src/App.tsx": 1, "api/server.js": 2 }',
+        'Example (for 3 repositories): { "context/project.md": -1, "src/App.tsx": 1, "api/server.js": 2 }',
         'Do not include any explanation, only the JSON object.',
       ].join('\n');
 
@@ -324,7 +325,7 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
       // Validate: must be an object with string keys and numeric values
       if (typeof routing !== 'object' || Array.isArray(routing)) return null;
       for (const val of Object.values(routing)) {
-        if (typeof val !== 'number' || val < -1 || val > 2) return null;
+        if (typeof val !== 'number' || val < -1 || val > maxRepoIndex) return null;
       }
       return routing;
     } catch {

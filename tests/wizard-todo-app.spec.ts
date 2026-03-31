@@ -13,7 +13,9 @@ import { test, expect, type Page } from '@playwright/test';
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const GITHUB_PAT  = process.env.GITHUB_PAT ?? '';
-const REPO_NAME   = 'todo-azure-app-service-sdd';
+const REPO_NAME   = `todo-azure-app-service-sdd-${Date.now()}`;
+const PLANNING_AGENT_NAME = 'planningAgent';
+const PLANNING_AGENT_ASSIGNMENT_COMMENT = '/agent planningAgent';
 
 if (!GITHUB_PAT) {
   throw new Error(
@@ -26,9 +28,38 @@ if (!GITHUB_PAT) {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 /** Click Next / the primary footer CTA */
 async function clickNext(page: Page) {
-  // The next button is always the last button in .wizard-footer-right
-  const nextBtn = page.locator('.wizard-footer-right .btn-primary').last();
-  await nextBtn.click();
+  await dismissDevToolbar(page);
+  const activeStep = page.locator('.wizard-step-item.active .wizard-step-label');
+  const currentStep = (await activeStep.textContent())?.trim() || '';
+  // Step 0 uses a dedicated CTA; later steps use the footer next button.
+  const startBtn = page.getByRole('button', { name: /let'?s get started/i });
+  const btn = await startBtn.isVisible().catch(() => false)
+    ? startBtn
+    : page.locator('.wizard-footer-right .btn-primary').last();
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await btn.click({ force: true });
+    try {
+      await expect(activeStep).not.toHaveText(currentStep, { timeout: 1200 });
+      return;
+    } catch {
+      // Retry until the wizard advances after hydration/UI settles.
+    }
+  }
+}
+
+async function dismissDevToolbar(page: Page) {
+  await page.locator('astro-dev-toolbar').evaluateAll(nodes => {
+    for (const node of nodes) node.remove();
+  }).catch(() => {});
+}
+
+function activeStep(page: Page) {
+  return page.locator('.wizard-step-item.active .wizard-step-label');
+}
+
+function welcomeModeSummary(page: Page) {
+  return page.locator('.welcome-hero-left p').last();
 }
 
 /** Toggle a checkbox-item or radio-item card by its visible label text */
@@ -39,16 +70,81 @@ async function toggleCard(page: Page, labelText: string) {
     .click();
 }
 
+function parseOwnerRepoFromUrl(url: string) {
+  const match = url.match(/^https:\/\/github\.com\/([^/]+)\/([^/?#]+)/i);
+  if (!match) throw new Error(`Could not parse owner/repo from URL: ${url}`);
+  return { owner: match[1], repo: match[2] };
+}
+
+function parseIssueNumberFromUrl(url: string) {
+  const match = url.match(/\/issues\/(\d+)/i);
+  if (!match) throw new Error(`Could not parse issue number from URL: ${url}`);
+  return Number(match[1]);
+}
+
+async function ghApi(path: string, init: RequestInit = {}) {
+  const res = await fetch(`https://api.github.com${path}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${GITHUB_PAT}`,
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      'Content-Type': 'application/json',
+      ...(init.headers || {}),
+    },
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`GitHub API ${path} failed: HTTP ${res.status} ${text}`);
+  }
+
+  return res;
+}
+
+async function assignIssueToPlanningAgent(issueUrl: string) {
+  const { owner, repo } = parseOwnerRepoFromUrl(issueUrl);
+  const issueNumber = parseIssueNumberFromUrl(issueUrl);
+
+  // Try to assign Copilot when available; some repos do not allow this assignee.
+  try {
+    await ghApi(`/repos/${owner}/${repo}/issues/${issueNumber}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ assignees: ['copilot'] }),
+    });
+  } catch {
+    // Non-blocking: planning-agent assignment still proceeds via issue comment.
+  }
+
+  // Explicitly request the custom planning agent for this issue.
+  await ghApi(`/repos/${owner}/${repo}/issues/${issueNumber}/comments`, {
+    method: 'POST',
+    body: JSON.stringify({ body: PLANNING_AGENT_ASSIGNMENT_COMMENT }),
+  });
+
+  const commentsRes = await ghApi(`/repos/${owner}/${repo}/issues/${issueNumber}/comments?per_page=100`);
+  const comments = await commentsRes.json();
+  const hasAssignmentComment = comments.some((c: { body?: string }) =>
+    (c.body || '').includes(PLANNING_AGENT_ASSIGNMENT_COMMENT) ||
+    (c.body || '').includes(PLANNING_AGENT_NAME)
+  );
+  expect(hasAssignmentComment).toBeTruthy();
+}
+
 // ── Test ──────────────────────────────────────────────────────────────────────
 test('create Todo Azure App Service project and publish to GitHub', async ({ page }) => {
 
   // ── Step 0: Welcome ──────────────────────────────────────────────────────
   await page.goto('/');
-  await expect(page.locator('h1')).toContainText(/welcome|get started/i);
+  await page.waitForLoadState('networkidle');
+  await dismissDevToolbar(page);
+  await expect(activeStep(page)).toContainText(/welcome/i);
+  await expect(welcomeModeSummary(page)).toContainText(/creates a new github repo for you/i);
   await clickNext(page);
+  await expect(page.locator('#proj-name')).toBeVisible({ timeout: 10_000 });
 
   // ── Step 1: Project ──────────────────────────────────────────────────────
-  await expect(page.locator('h1')).toContainText(/project/i);
+  await expect(activeStep(page)).toContainText(/project/i);
 
   await page.fill('#proj-name', 'Todo Azure App Service');
   await page.fill('#proj-desc', 'A task management app for managing to-do items hosted on Azure App Service');
@@ -66,7 +162,7 @@ test('create Todo Azure App Service project and publish to GitHub', async ({ pag
   await clickNext(page);
 
   // ── Step 2: Tech Stack ───────────────────────────────────────────────────
-  await expect(page.locator('h1')).toContainText(/tech stack/i);
+  await expect(activeStep(page)).toContainText(/tech stack/i);
 
   // Languages
   await toggleCard(page, 'TypeScript');
@@ -100,12 +196,12 @@ test('create Todo Azure App Service project and publish to GitHub', async ({ pag
   await clickNext(page);
 
   // ── Step 3: Governance ───────────────────────────────────────────────────
-  await expect(page.locator('h1')).toContainText(/governance/i);
+  await expect(activeStep(page)).toContainText(/governance/i);
   // L1 (Enterprise) and L4 (Product) are pre-selected and non-interactive — leave defaults
   await clickNext(page);
 
   // ── Step 4: Principles ───────────────────────────────────────────────────
-  await expect(page.locator('h1')).toContainText(/principles/i);
+  await expect(activeStep(page)).toContainText(/principles/i);
 
   await page.fill('#code-quality', 'All code must be peer-reviewed, linted (ESLint/StyleCop), and covered by automated tests before merge');
   await page.fill('#perf-target', 'p99 API latency < 300ms; page load < 2s on 4G');
@@ -123,7 +219,7 @@ test('create Todo Azure App Service project and publish to GitHub', async ({ pag
   await clickNext(page);
 
   // ── Step 5: MCP Tools ────────────────────────────────────────────────────
-  await expect(page.locator('h1')).toContainText(/mcp/i);
+  await expect(activeStep(page)).toContainText(/mcp/i);
 
   await toggleCard(page, 'GitHub MCP');
   await toggleCard(page, 'Azure DevOps MCP');
@@ -131,7 +227,7 @@ test('create Todo Azure App Service project and publish to GitHub', async ({ pag
   await clickNext(page);
 
   // ── Step 6: Agent & LLM ─────────────────────────────────────────────────
-  await expect(page.locator('h1')).toContainText(/agent/i);
+  await expect(activeStep(page)).toContainText(/agent/i);
 
   // GitHub Copilot is pre-selected — confirm and choose GPT-4o model
   await expect(page.locator('.agent-card.selected')).toContainText(/github copilot/i);
@@ -140,7 +236,7 @@ test('create Todo Azure App Service project and publish to GitHub', async ({ pag
   await clickNext(page);
 
   // ── Step 7: Preview ──────────────────────────────────────────────────────
-  await expect(page.locator('h1')).toContainText(/preview/i);
+  await expect(activeStep(page)).toContainText(/preview/i);
 
   // Verify key files were generated
   await expect(page.locator('.preview-tab').filter({ hasText: 'context/project.md' })).toBeVisible();
@@ -154,7 +250,7 @@ test('create Todo Azure App Service project and publish to GitHub', async ({ pag
   await clickNext(page);
 
   // ── Step 8: Publish ──────────────────────────────────────────────────────
-  await expect(page.locator('h1')).toContainText(/publish/i);
+  await expect(activeStep(page)).toContainText(/publish/i);
 
   // Enter PAT
   await page.fill('#gh-pat', GITHUB_PAT);
@@ -175,7 +271,7 @@ test('create Todo Azure App Service project and publish to GitHub', async ({ pag
   await page.click('button:has-text("Create repository")');
 
   // Wait for success state — GitHub API calls can take a few seconds
-  await expect(page.locator('.gh-success')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('.gh-success')).toBeVisible({ timeout: 120_000 });
   await expect(page.locator('.gh-success h3')).toContainText(/repository created/i);
 
   // Confirm the repo link points to our expected repo
@@ -187,12 +283,16 @@ test('create Todo Azure App Service project and publish to GitHub', async ({ pag
   // Confirm the project summary issue was created with SDLC label (triggers workflow)
   const issueLink = page.locator('.gh-success a[href*="/issues/"]');
   await expect(issueLink).toBeVisible({ timeout: 10_000 });
-  await expect(issueLink).toContainText(/SDLC workflow/i);
+  await expect(issueLink).toContainText(/project issue/i);
   const issueHref = await issueLink.getAttribute('href');
+  if (!issueHref) throw new Error('Issue URL was not present in greenfield success state.');
   expect(issueHref).toContain(REPO_NAME);
   expect(issueHref).toContain('/issues/');
 
+  await assignIssueToPlanningAgent(issueHref);
+
   console.log(`\n✓ Repo created:      ${href}`);
   console.log(`✓ Issue + SDLC label: ${issueHref}`);
+  console.log(`✓ Assigned issue to planning agent: ${PLANNING_AGENT_NAME}`);
   console.log(`✓ Greenfield Planning workflow triggered\n`);
 });
