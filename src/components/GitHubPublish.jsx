@@ -40,6 +40,101 @@ function parseRepo(input) {
   return null;
 }
 
+function scoreRoleFromRepoName(repoName) {
+  const slug = (repoName || '').split('/').pop().toLowerCase();
+  const frontendHints = ['frontend', 'fe-', '-fe', '.fe', 'ui', 'web', 'client',
+    'react', 'angular', 'next', 'portal', 'spa'];
+  const backendHints = ['backend', 'api', 'be-', '-be', '.be', 'server', 'service',
+    'services', 'aspnet', 'spring', 'nest', 'python', 'worker'];
+  return {
+    frontend: frontendHints.reduce((n, hint) => n + (slug.includes(hint) ? 1 : 0), 0),
+    backend: backendHints.reduce((n, hint) => n + (slug.includes(hint) ? 1 : 0), 0),
+  };
+}
+
+function scoreRoleFromPaths(existingPaths) {
+  const indicators = {
+    frontend: [
+      /^src\//i, /^public\//i, /^pages\//i, /^components\//i, /^styles\//i,
+      /^assets\//i, /^ui\//i, /^frontend\//i, /^web\//i,
+      /(^|\/)next\.config\.(js|mjs|ts)$/i,
+      /(^|\/)vite\.config\.(js|mjs|ts)$/i,
+      /(^|\/)angular\.json$/i,
+      /(^|\/)tsconfig\.json$/i,
+      /(^|\/)package\.json$/i,
+    ],
+    backend: [
+      /^api\//i, /^server\//i, /^backend\//i, /^services?\//i, /^controllers?\//i,
+      /^routes?\//i, /^handlers?\//i, /^migrations?\//i, /^alembic\//i,
+      /(^|\/)requirements\.txt$/i,
+      /(^|\/)pyproject\.toml$/i,
+      /(^|\/)pom\.xml$/i,
+      /(^|\/)build\.gradle(\.kts)?$/i,
+      /(^|\/)Cargo\.toml$/i,
+      /(^|\/)go\.mod$/i,
+      /(^|\/)Dockerfile$/i,
+      /\.csproj$/i,
+    ],
+  };
+
+  let frontend = 0;
+  let backend = 0;
+  for (const path of existingPaths) {
+    if (indicators.frontend.some(rx => rx.test(path))) frontend++;
+    if (indicators.backend.some(rx => rx.test(path))) backend++;
+  }
+  return { frontend, backend };
+}
+
+async function fetchExistingBlobPaths(repoName, baseTreeSha, token) {
+  const paths = new Set();
+
+  // Fast path: single recursive tree call.
+  const recursiveRes = await ghFetch(
+    `/repos/${repoName}/git/trees/${baseTreeSha}?recursive=1`,
+    token,
+  );
+
+  if (recursiveRes.ok) {
+    const payload = await recursiveRes.json();
+    for (const entry of (payload.tree || [])) {
+      if (entry.type === 'blob') paths.add(entry.path);
+    }
+    if (!payload.truncated) return paths;
+  }
+
+  // Robust path: walk every tree node when GitHub truncates recursive responses.
+  const queue = [{ sha: baseTreeSha, prefix: '' }];
+  const visited = new Set();
+  const MAX_TREE_NODES = 20000;
+
+  while (queue.length > 0) {
+    if (visited.size > MAX_TREE_NODES) {
+      // Safety guard: return the best snapshot we have rather than failing the publish.
+      return paths;
+    }
+
+    const { sha, prefix } = queue.shift();
+    if (!sha || visited.has(sha)) continue;
+    visited.add(sha);
+
+    const treeRes = await ghFetch(`/repos/${repoName}/git/trees/${sha}`, token);
+    if (!treeRes.ok) continue;
+    const payload = await treeRes.json();
+
+    for (const entry of (payload.tree || [])) {
+      const fullPath = `${prefix}${entry.path}`;
+      if (entry.type === 'blob') {
+        paths.add(fullPath);
+      } else if (entry.type === 'tree' && entry.sha) {
+        queue.push({ sha: entry.sha, prefix: `${fullPath}/` });
+      }
+    }
+  }
+
+  return paths;
+}
+
 // ── Tech-role routing ──────────────────────────────────────────────────────
 // Instruction files that only belong in a frontend or backend repo.
 // Anything not listed here is treated as 'shared' → goes to every repo.
@@ -64,14 +159,17 @@ const FILE_ROLE = {
  * Infer whether a repo is frontend, backend, or fullstack from its name.
  * repoName is 'owner/repo' — we look at the repo slug only.
  */
-function classifyRepoRole(repoName) {
-  const slug = (repoName || '').split('/').pop().toLowerCase();
-  const FE = ['frontend', 'fe-', '-fe', '.fe', 'ui', 'web', 'client',
-               'react', 'angular', 'next', 'portal', 'spa'];
-  const BE = ['backend', 'api', 'be-', '-be', '.be', 'server', 'service',
-               'services', 'aspnet', 'spring', 'nest', 'python', 'worker'];
-  if (FE.some(p => slug.includes(p))) return 'frontend';
-  if (BE.some(p => slug.includes(p))) return 'backend';
+function classifyRepoRole(repoName, existingPaths = new Set()) {
+  const nameScore = scoreRoleFromRepoName(repoName);
+  const pathScore = scoreRoleFromPaths(existingPaths);
+  const frontendScore = nameScore.frontend + pathScore.frontend;
+  const backendScore = nameScore.backend + pathScore.backend;
+
+  // Prefer fullstack unless one side has a meaningful lead.
+  const delta = Math.abs(frontendScore - backendScore);
+  if (frontendScore > 0 && backendScore > 0 && delta < 2) return 'fullstack';
+  if (frontendScore >= backendScore + 2) return 'frontend';
+  if (backendScore >= frontendScore + 2) return 'backend';
   return 'fullstack';
 }
 
@@ -80,9 +178,9 @@ function classifyRepoRole(repoName) {
  * Only applied when there are multiple target repos — a single repo always
  * receives every file that passed path-prefix routing.
  */
-function filterByRepoRole(fileMap, repoName, totalRepos) {
+function filterByRepoRole(fileMap, repoName, totalRepos, existingPaths = new Set()) {
   if (totalRepos <= 1) return fileMap;
-  const role = classifyRepoRole(repoName);
+  const role = classifyRepoRole(repoName, existingPaths);
   if (role === 'fullstack') return fileMap;
   const result = {};
   for (const [path, content] of Object.entries(fileMap)) {
@@ -403,8 +501,6 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
         const routedFiles = aiRoutingMap
           ? applyAiRouting(files, aiRoutingMap, repoIndex)
           : routeFilesToRepo(files);
-        // Remove instruction files that don't belong in this repo's tech role
-        const repoFiles = filterByRepoRole(routedFiles, targetRepo, targetRepos.length);
         const repoLabel = targetRepos.length > 1 ? ` (${repoIndex + 1}/${targetRepos.length}: ${targetRepo})` : ` (${targetRepo})`;
 
         // Step 1: Verify access + get default branch
@@ -432,16 +528,15 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
 
         // Step 3.5: Analyse repo — collect existing paths so we never overwrite them
         setProgress(`Analysing existing files in ${targetRepo}…`);
-        const existingPaths = new Set();
-        const existingTreeRes = await ghFetch(
-          `/repos/${targetRepo}/git/trees/${baseTreeSha}?recursive=1`, token,
+        const existingPaths = await fetchExistingBlobPaths(targetRepo, baseTreeSha, token);
+
+        // Remove instruction files that don't belong in this repo's tech role.
+        const repoFiles = filterByRepoRole(
+          routedFiles,
+          targetRepo,
+          targetRepos.length,
+          existingPaths,
         );
-        if (existingTreeRes.ok) {
-          const treePayload = await existingTreeRes.json();
-          (treePayload.tree || [])
-            .filter(e => e.type === 'blob')
-            .forEach(e => existingPaths.add(e.path));
-        }
 
         // Keep only files absent from the repo
         const filteredRepoFiles = Object.fromEntries(
