@@ -92,8 +92,8 @@ function walk(dir, result = {}) {
 const files = walk(KIT_ROOT);
 
 // ── Also bundle agentic workflow files from .github/workflows/ ───────────────
-// These are pushed to the target repo so the Greenfield Planning workflow
-// fires automatically when the SDLC issue is created.
+// These are pushed to the target repo so the agentic workflow fires
+// automatically when the SDLC issue is created.
 const WORKFLOWS_DIR    = join(PROJECT_ROOT, '.github', 'workflows');
 const WORKFLOW_EXCLUDE = new Set(['deploy.yml']);
 try {
@@ -107,6 +107,21 @@ try {
     }
   }
 } catch { /* skip if workflows dir is missing */ }
+
+// ── Also bundle custom agent definitions from .github/agents/ ────────────────
+// These define the Copilot custom agents (planning, backend, uiux, testing)
+// and must be present in target repos for the agentic workflow to function.
+const AGENTS_DIR = join(PROJECT_ROOT, '.github', 'agents');
+try {
+  for (const entry of readdirSync(AGENTS_DIR)) {
+    const ext = extname(entry).toLowerCase();
+    if (ext === '.md') {
+      try {
+        files[`.github/agents/${entry}`] = readFileSync(join(AGENTS_DIR, entry), 'utf8');
+      } catch { /* skip unreadable */ }
+    }
+  }
+} catch { /* skip if agents dir is missing */ }
 
 mkdirSync(OUT_DIR, { recursive: true });
 writeFileSync(OUT_FILE, JSON.stringify(files, null, 2));
