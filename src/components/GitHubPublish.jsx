@@ -791,16 +791,10 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
 
       setPrUrls(collectedPrUrls);
 
-      // Create SDLC + copilot labels, issue, and planning-agent assignment on Repo 1 only
-      setProgress('Creating SDLC label and issue…');
+      // Create copilot label, issue, and planning-agent assignment on Repo 1 only
+      setProgress('Creating issue…');
       try {
         const primaryRepo = targetRepos[0];
-
-        // SDLC label for project tracking
-        await ghFetch(`/repos/${primaryRepo}/labels`, token, {
-          method: 'POST',
-          body: { name: 'SDLC', color: '0075ca', description: 'Tracks SDLC project issues' },
-        });
 
         // copilot label — triggers the GitHub Copilot coding agent (planning agent)
         // when applied to an issue; create it if it doesn't already exist.
@@ -818,7 +812,7 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
           body: {
             title: `Project: ${projectName || primaryRepo}`,
             body: issueBody,
-            labels: ['SDLC', 'copilot'],
+            labels: ['copilot'],
           },
         });
         if (issueRes.ok) {
@@ -859,7 +853,7 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
   //      base_tree=prevTreeSha) to stay well under the 114-object limit.
   //   4. Fast-forward the default branch after every batch commit so that
   //      base_tree on the next batch always points to a "locally registered" tree.
-  //   5. Create SDLC label + issue.
+  //   5. Create issue.
   //
   // Why nested subtrees & 85-file batches?
   //   GitHub counts ALL new git objects (blobs + intermediate tree nodes) vs the
@@ -1140,13 +1134,7 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
         prevCommitSha = wfCommit.sha;
       }
 
-      // ── Step 6: Create SDLC + copilot labels, issue, and planning-agent assignment ──
-      setProgress('Creating SDLC label…');
-      await ghFetch(`/repos/${full}/labels`, token, {
-        method: 'POST',
-        body: { name: 'SDLC', color: '0075ca', description: 'Triggers the SDLC Greenfield Planning agentic workflow' },
-      });
-
+      // ── Step 6: Create copilot label, issue, and planning-agent assignment ──
       // copilot label — triggers the GitHub Copilot coding agent (planning agent)
       // when applied to an issue; create it if it doesn't already exist.
       const copilotLabelCheck = await ghFetch(`/repos/${full}/labels/copilot`, token);
@@ -1164,7 +1152,7 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
         body: {
           title:  `Project: ${projectName || repoName.trim()}`,
           body:   issueBody,
-          labels: ['SDLC', 'copilot'],
+          labels: ['copilot'],
         },
       });
       if (issueRes.ok) {

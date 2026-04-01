@@ -449,7 +449,6 @@ const userGuide = [
   numbered('Additional batches committed until all non-workflow files are pushed'),
   numbered('GitHub Actions workflow files (.github/workflows/) pushed in a final dedicated commit (requires workflow PAT scope)'),
   numbered('COPILOT_GITHUB_TOKEN secret created in the new repo using the fine-grained PAT'),
-  numbered('SDLC label created in the repo'),
   numbered('Initial SDLC issue created to trigger the Greenfield Planning Copilot Coding Agent workflow'),
   note('The multi-batch commit strategy is required because GitHub\'s API enforces a limit of ~114 unique new objects per commit. The wizard handles this transparently.', 'info'),
   body(''),
