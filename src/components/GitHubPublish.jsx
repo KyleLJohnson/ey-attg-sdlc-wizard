@@ -917,76 +917,7 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
       const nonWfEntries  = allEntries.filter(([p]) => !p.includes('.github/workflows/'));
       const wfEntries     = allEntries.filter(([p]) =>  p.includes('.github/workflows/'));
 
-      // ── Step 3: Post sub-directory trees (helper) ────────────────────────
-      // POST a leaf-level tree (no nested dir references) and return its SHA.
-      async function postLeafTree(blobItems) {
-        const res = await ghFetch(`/repos/${full}/git/trees`, token, {
-          method: 'POST',
-          body: { tree: blobItems },
-        });
-        if (!res.ok) {
-          const e = await res.json().catch(() => ({}));
-          throw new Error(`Could not create sub-tree (HTTP ${res.status}): ${e.message || 'unknown'}`);
-        }
-        return (await res.json()).sha;
-      }
-
-      // Build a dir-node map from a flat file list, then recursively POST sub-trees.
-      // Returns an array of root-level tree items (either blobs or {path, sha} dirs).
-      async function buildRootItems(fileEntries) {
-        const dirMap = {};
-        const rootBlobs = [];
-        for (const [fp, content] of fileEntries) {
-          const slash = fp.indexOf('/');
-          if (slash === -1) {
-            rootBlobs.push({ path: fp, mode: '100644', type: 'blob', content });
-          } else {
-            const dir = fp.slice(0, slash);
-            (dirMap[dir] ??= []).push([fp.slice(slash + 1), content]);
-          }
-        }
-        const items = [...rootBlobs];
-        for (const [dir, children] of Object.entries(dirMap)) {
-          const subItems = await buildRootItemsRecurse(children);
-          const sha = await postLeafTreeRecurse(subItems);
-          items.push({ path: dir, mode: '040000', type: 'tree', sha });
-        }
-        return items;
-      }
-
-      // Recursively build sub-items for nested directories, posting leaf trees first.
-      async function buildRootItemsRecurse(fileEntries) {
-        const dirMap = {};
-        const blobs = [];
-        for (const [fp, content] of fileEntries) {
-          const slash = fp.indexOf('/');
-          if (slash === -1) {
-            blobs.push({ path: fp, mode: '100644', type: 'blob', content });
-          } else {
-            const dir = fp.slice(0, slash);
-            (dirMap[dir] ??= []).push([fp.slice(slash + 1), content]);
-          }
-        }
-        const items = [...blobs];
-        for (const [dir, children] of Object.entries(dirMap)) {
-          const subItems = await buildRootItemsRecurse(children);
-          const sha = await postLeafTreeRecurse(subItems);
-          items.push({ path: dir, mode: '040000', type: 'tree', sha });
-        }
-        return items;
-      }
-
-      async function postLeafTreeRecurse(items) {
-        const res = await ghFetch(`/repos/${full}/git/trees`, token, {
-          method: 'POST',
-          body: { tree: items },
-        });
-        if (!res.ok) {
-          const e = await res.json().catch(() => ({}));
-          throw new Error(`Could not create sub-tree (HTTP ${res.status}): ${e.message || 'unknown'}`);
-        }
-        return (await res.json()).sha;
-      }
+      // ── Step 3: (flat-items helper — no nested sub-tree construction needed) ─
 
       // ── Step 4: Commit in batches of ≤85 non-workflow files ──────────────
       const BATCH = 85;
@@ -1000,14 +931,16 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
         const batch = nonWfEntries.slice(i, i + BATCH);
         setProgress(`Pushing files… (batch ${batchNum}/${totalBatches})`);
 
-        const rootItems = await buildRootItems(batch);
-        const isFirstBatch = (i === 0);
+        // Use flat full-path items so that base_tree merges each batch into the
+        // existing tree rather than replacing subdirectory trees wholesale.
+        // This prevents a later batch from overwriting .github/ content (agents,
+        // instructions, prompts) committed in an earlier batch.
+        const flatItems = batch.map(([fp, content]) => ({
+          path: fp, mode: '100644', type: 'blob', content,
+        }));
         const treeRes = await ghFetch(`/repos/${full}/git/trees`, token, {
           method: 'POST',
-          body: {
-            tree:      rootItems,
-            base_tree: isFirstBatch ? initTreeSha : prevTreeSha,
-          },
+          body: { tree: flatItems, base_tree: prevTreeSha },
         });
         if (!treeRes.ok) {
           const e = await treeRes.json().catch(() => ({}));
@@ -1054,56 +987,21 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
         batchNum++;
         setProgress(`Pushing workflow files… (batch ${batchNum}/${totalBatches})`);
 
-        // We need to merge .github/workflows/ into the existing .github/ tree
-        // from the previous commit rather than overwrite it.
-        const prevTreeListRes = await ghFetch(`/repos/${full}/git/trees/${prevTreeSha}`, token);
-        const prevTreeList = prevTreeListRes.ok ? await prevTreeListRes.json() : null;
-        const existingGithubSha = prevTreeList?.tree?.find(e => e.path === '.github')?.sha ?? null;
-
-        // Build workflows sub-tree (just filenames, no path separators)
-        const wfBlobItems = wfEntries.map(([fp, content]) => ({
-          path: fp.split('/').pop(),
-          mode: '100644',
-          type: 'blob',
-          content,
+        // Use flat full-path items with base_tree so .github/workflows/ is merged
+        // into the existing .github/ tree (preserving agents/, instructions/, etc.)
+        // rather than replacing it — same approach as the brownfield path.
+        const wfFlatItems = wfEntries.map(([fp, content]) => ({
+          path: fp, mode: '100644', type: 'blob', content,
         }));
-        const wfSubRes = await ghFetch(`/repos/${full}/git/trees`, token, {
+        const rRes = await ghFetch(`/repos/${full}/git/trees`, token, {
           method: 'POST',
-          body: { tree: wfBlobItems },
+          body: { base_tree: prevTreeSha, tree: wfFlatItems },
         });
-        if (!wfSubRes.ok) {
-          const e = await wfSubRes.json().catch(() => ({}));
-          throw new Error(`Could not create workflows sub-tree (HTTP ${wfSubRes.status}): ${e.message || 'unknown'}`);
+        if (!rRes.ok) {
+          const e = await rRes.json().catch(() => ({}));
+          throw new Error(`Could not create root tree for workflows (HTTP ${rRes.status}): ${e.message || 'unknown'}`);
         }
-        const wfSubSha = (await wfSubRes.json()).sha;
-
-        // Build merged .github/ tree (add 'workflows' dir to existing .github/)
-        const githubTreeBody = existingGithubSha
-          ? { base_tree: existingGithubSha, tree: [{ path: 'workflows', mode: '040000', type: 'tree', sha: wfSubSha }] }
-          : { tree: [{ path: 'workflows', mode: '040000', type: 'tree', sha: wfSubSha }] };
-        const githubRes = await ghFetch(`/repos/${full}/git/trees`, token, {
-          method: 'POST',
-          body: githubTreeBody,
-        });
-        if (!githubRes.ok) {
-          const e = await githubRes.json().catch(() => ({}));
-          throw new Error(`Could not create .github tree (HTTP ${githubRes.status}): ${e.message || 'unknown'}`);
-        }
-        const newGithubSha = (await githubRes.json()).sha;
-
-        // Root tree: add .github reference on top of prevTreeSha
-        const rootTreeRes = await ghFetch(`/repos/${full}/git/trees`, token, {
-          method: 'POST',
-          body: {
-            base_tree: prevTreeSha,
-            tree: [{ path: '.github', mode: '040000', type: 'tree', sha: newGithubSha }],
-          },
-        });
-        if (!rootTreeRes.ok) {
-          const e = await rootTreeRes.json().catch(() => ({}));
-          throw new Error(`Could not create root tree for workflows (HTTP ${rootTreeRes.status}): ${e.message || 'unknown'}`);
-        }
-        const wfTreeSha = (await rootTreeRes.json()).sha;
+        const wfTreeSha = (await rRes.json()).sha;
 
         const wfCommitRes = await ghFetch(`/repos/${full}/git/commits`, token, {
           method: 'POST',
