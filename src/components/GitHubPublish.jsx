@@ -21,6 +21,7 @@ import { useState } from 'react';
 const GITHUB_API = 'https://api.github.com';
 const PAT_CREATE_URL = 'https://github.com/settings/tokens/new?scopes=repo%2Cworkflow&description=EY+ATTG+SDLC+Wizard';
 const FINE_GRAINED_PAT_URL = 'https://github.com/settings/personal-access-tokens/new';
+const ALWAYS_SHARED_PREFIXES = ['.github/agents/', '.github/workflows/'];
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function slugify(name) {
@@ -41,7 +42,15 @@ function parseRepo(input) {
 }
 
 function isAlwaysSharedPath(path) {
-  return path.startsWith('.github/agents/') || path.startsWith('.github/workflows/');
+  return ALWAYS_SHARED_PREFIXES.some(prefix => path.startsWith(prefix));
+}
+
+function enforceAlwaysSharedFiles(sourceFiles, targetFiles) {
+  const merged = { ...targetFiles };
+  for (const [path, content] of Object.entries(sourceFiles)) {
+    if (isAlwaysSharedPath(path)) merged[path] = content;
+  }
+  return merged;
 }
 
 function scoreRoleFromRepoName(repoName) {
@@ -574,12 +583,14 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
         const existingPaths = await fetchExistingBlobPaths(targetRepo, baseTreeSha, token);
 
         // Remove instruction files that don't belong in this repo's tech role.
-        const repoFiles = filterByRepoRole(
+        const roleFilteredFiles = filterByRepoRole(
           routedFiles,
           targetRepo,
           targetRepos.length,
           existingPaths,
         );
+        // Hard guarantee: all repos always receive all shared GitHub automation files.
+        const repoFiles = enforceAlwaysSharedFiles(files, roleFilteredFiles);
 
         // Keep only files absent from the repo
         const filteredRepoFiles = Object.fromEntries(
