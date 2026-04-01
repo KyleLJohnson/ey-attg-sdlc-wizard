@@ -81,11 +81,11 @@ jobs:
               await github.rest.issues.checkUserCanBeAssigned({
                 owner:    context.repo.owner,
                 repo:     context.repo.repo,
-                assignee: 'copilot-swe-agent',
+                assignee: 'copilot',
               });
               canAssignCopilot = true;
             } catch {
-              core.warning('Assignee "copilot-swe-agent" is not valid for this repository — skipping agent assignment.');
+              core.warning('Assignee "copilot" is not valid for this repository — skipping assignment.');
             }
 
             // --- Fetch existing open copilot issues for dedup ---
@@ -121,9 +121,7 @@ jobs:
                 continue;
               }
 
-              // Use github.request (not github.rest) so that the non-standard
-              // agent_assignment body field is forwarded to the GitHub API.
-              const createBody = {
+              const createParams = {
                 owner:  context.repo.owner,
                 repo:   context.repo.repo,
                 title:  issue.title,
@@ -132,23 +130,9 @@ jobs:
               };
 
               if (canAssignCopilot) {
-                // copilot-swe-agent[bot] is the coding-agent bot account.
-                // agent_assignment.custom_agent selects planning.agent.md.
-                Object.assign(createBody, {
-                  assignees: ['copilot-swe-agent[bot]'],
-                  agent_assignment: {
-                    target_repo: `${context.repo.owner}/${context.repo.repo}`,
-                    base_branch: 'main',
-                    custom_instructions: '',
-                    custom_agent: 'planning',
-                    model: '',
-                  },
-                });
+                createParams.assignees = ['copilot'];
               }
 
-              const { data: created } = await github.request(
-                'POST /repos/{owner}/{repo}/issues',
-                createBody,
-              );
+              const { data: created } = await github.rest.issues.create(createParams);
               core.info(`Created issue #${created.number}: ${created.html_url}`);
             }
