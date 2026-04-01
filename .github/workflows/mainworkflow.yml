@@ -81,11 +81,11 @@ jobs:
               await github.rest.issues.checkUserCanBeAssigned({
                 owner:    context.repo.owner,
                 repo:     context.repo.repo,
-                assignee: 'copilot',
+                assignee: 'copilot-swe-agent',
               });
               canAssignCopilot = true;
             } catch {
-              core.warning('Assignee "copilot" is not valid for this repository — skipping assignment.');
+              core.warning('Assignee "copilot-swe-agent" is not valid for this repository — skipping agent assignment.');
             }
 
             // --- Fetch existing open copilot issues for dedup ---
@@ -121,7 +121,9 @@ jobs:
                 continue;
               }
 
-              const createParams = {
+              // Use github.request (not github.rest) so that the non-standard
+              // agent_assignment body field is forwarded to the GitHub API.
+              const createBody = {
                 owner:  context.repo.owner,
                 repo:   context.repo.repo,
                 title:  issue.title,
@@ -130,9 +132,23 @@ jobs:
               };
 
               if (canAssignCopilot) {
-                createParams.assignees = ['copilot'];
+                // copilot-swe-agent[bot] is the coding-agent bot account.
+                // agent_assignment.custom_agent selects planning.agent.md.
+                Object.assign(createBody, {
+                  assignees: ['copilot-swe-agent[bot]'],
+                  agent_assignment: {
+                    target_repo: `${context.repo.owner}/${context.repo.repo}`,
+                    base_branch: 'main',
+                    custom_instructions: '',
+                    custom_agent: 'planning',
+                    model: '',
+                  },
+                });
               }
 
-              const { data: created } = await github.rest.issues.create(createParams);
+              const { data: created } = await github.request(
+                'POST /repos/{owner}/{repo}/issues',
+                createBody,
+              );
               core.info(`Created issue #${created.number}: ${created.html_url}`);
             }

@@ -35,3 +35,4 @@ npm-debug.log*
 
 # ── Local-only files (do not push) ───────────────────────────────────────────
 tests/
+test-results/

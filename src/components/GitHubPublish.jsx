@@ -605,35 +605,23 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
           continue;
         }
 
-        // Step 4: Build & commit files in batches using nested subtrees
+        // Step 4: Build & commit files in batches.
+        // Files are pushed as flat blob entries with full paths (e.g.
+        // ".github/agents/planning.agent.md"). When GitHub creates a tree with
+        // base_tree, flat path entries patch individual files without replacing
+        // entire directory subtrees — preserving any pre-existing files in the
+        // same directories (e.g. existing .github/agents/ content).
         const allEntries   = Object.entries(filteredRepoFiles);
         const nonWfEntries = allEntries.filter(([p]) => !p.includes('.github/workflows/'));
         const wfEntries    = allEntries.filter(([p]) =>  p.includes('.github/workflows/'));
 
-        async function postLeafTree(items) {
-          const res = await ghFetch(`/repos/${targetRepo}/git/trees`, token, {
-            method: 'POST', body: { tree: items },
-          });
-          if (!res.ok) {
-            const e = await res.json().catch(() => ({}));
-            throw new Error(`Could not create sub-tree (HTTP ${res.status}): ${e.message || 'unknown'}`);
-          }
-          return (await res.json()).sha;
-        }
-        async function buildRootItemsRecurse(fileEntries) {
-          const dirMap = {};
-          const blobs = [];
-          for (const [fp, content] of fileEntries) {
-            const slash = fp.indexOf('/');
-            if (slash === -1) blobs.push({ path: fp, mode: '100644', type: 'blob', content });
-            else { const dir = fp.slice(0, slash); (dirMap[dir] ??= []).push([fp.slice(slash + 1), content]); }
-          }
-          const items = [...blobs];
-          for (const [dir, children] of Object.entries(dirMap)) {
-            const subItems = await buildRootItemsRecurse(children);
-            items.push({ path: dir, mode: '040000', type: 'tree', sha: await postLeafTree(subItems) });
-          }
-          return items;
+        async function buildFlatItems(fileEntries) {
+          return fileEntries.map(([fp, content]) => ({
+            path: fp,
+            mode: '100644',
+            type: 'blob',
+            content,
+          }));
         }
 
         const tempBranchRes = await ghFetch(`/repos/${targetRepo}/git/refs`, token, {
@@ -657,7 +645,7 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
           const batch = nonWfEntries.slice(i, i + BATCH);
           setProgress(`Pushing files to ${targetRepo}… (batch ${batchNum}/${totalBatches})`);
 
-          const rootItems = await buildRootItemsRecurse(batch);
+          const rootItems = await buildFlatItems(batch);
           const treeRes = await ghFetch(`/repos/${targetRepo}/git/trees`, token, {
             method: 'POST',
             body: { tree: rootItems, base_tree: prevTreeSha },
@@ -701,30 +689,15 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
           batchNum++;
           setProgress(`Pushing workflow files to ${targetRepo}… (batch ${batchNum}/${totalBatches})`);
 
-          const prevTreeListRes = await ghFetch(`/repos/${targetRepo}/git/trees/${prevTreeSha}`, token);
-          const prevTreeList = prevTreeListRes.ok ? await prevTreeListRes.json() : null;
-          const existingGithubSha = prevTreeList?.tree?.find(e => e.path === '.github')?.sha ?? null;
-
+          // Use flat entries with full paths so base_tree preserves everything else
+          // in .github/ (agents/, instructions/, etc.) without replacement.
           const wfBlobItems = wfEntries.map(([fp, content]) => ({
-            path: fp.split('/').pop(), mode: '100644', type: 'blob', content,
+            path: fp, mode: '100644', type: 'blob', content,
           }));
-          const wfSubSha = await postLeafTree(wfBlobItems);
-
-          const githubTreeBody = existingGithubSha
-            ? { base_tree: existingGithubSha, tree: [{ path: 'workflows', mode: '040000', type: 'tree', sha: wfSubSha }] }
-            : { tree: [{ path: 'workflows', mode: '040000', type: 'tree', sha: wfSubSha }] };
-          const gRes = await ghFetch(`/repos/${targetRepo}/git/trees`, token, {
-            method: 'POST', body: githubTreeBody,
-          });
-          if (!gRes.ok) {
-            const e = await gRes.json().catch(() => ({}));
-            throw new Error(`Could not create .github tree (HTTP ${gRes.status}): ${e.message || 'unknown'}`);
-          }
-          const newGithubSha = (await gRes.json()).sha;
 
           const rRes = await ghFetch(`/repos/${targetRepo}/git/trees`, token, {
             method: 'POST',
-            body: { base_tree: prevTreeSha, tree: [{ path: '.github', mode: '040000', type: 'tree', sha: newGithubSha }] },
+            body: { base_tree: prevTreeSha, tree: wfBlobItems },
           });
           if (!rRes.ok) {
             const e = await rRes.json().catch(() => ({}));
@@ -818,26 +791,47 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
 
       setPrUrls(collectedPrUrls);
 
-      // Create SDLC label + issue on Repo 1 only
+      // Create SDLC + copilot labels, issue, and planning-agent assignment on Repo 1 only
       setProgress('Creating SDLC label and issue…');
       try {
         const primaryRepo = targetRepos[0];
+
+        // SDLC label for project tracking
         await ghFetch(`/repos/${primaryRepo}/labels`, token, {
           method: 'POST',
           body: { name: 'SDLC', color: '0075ca', description: 'Tracks SDLC project issues' },
         });
+
+        // copilot label — triggers the GitHub Copilot coding agent (planning agent)
+        // when applied to an issue; create it if it doesn't already exist.
+        const copilotLabelCheck = await ghFetch(`/repos/${primaryRepo}/labels/copilot`, token);
+        if (!copilotLabelCheck.ok) {
+          await ghFetch(`/repos/${primaryRepo}/labels`, token, {
+            method: 'POST',
+            body: { name: 'copilot', color: '1d76db', description: 'Assign to GitHub Copilot coding agent' },
+          });
+        }
+
         const issueBody = buildIssueBody(wizardData, projectName || primaryRepo, { targetRepos });
         const issueRes = await ghFetch(`/repos/${primaryRepo}/issues`, token, {
           method: 'POST',
           body: {
             title: `Project: ${projectName || primaryRepo}`,
             body: issueBody,
-            labels: ['SDLC'],
+            labels: ['SDLC', 'copilot'],
           },
         });
         if (issueRes.ok) {
           const issue = await issueRes.json();
           setIssueUrl(issue.html_url);
+
+          // Assign copilot as the issue assignee to trigger the planning agent.
+          // Non-fatal: copilot coding agent may not be enabled for this repo yet;
+          // the 'copilot' label alone will still trigger it once enabled.
+          await ghFetch(`/repos/${primaryRepo}/issues/${issue.number}`, token, {
+            method: 'PATCH',
+            body: { assignees: ['copilot'] },
+          });
         }
       } catch {
         // Issue creation is best-effort; don't block success
@@ -1146,12 +1140,22 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
         prevCommitSha = wfCommit.sha;
       }
 
-      // ── Step 6: Create SDLC label + issue ────────────────────────────────
+      // ── Step 6: Create SDLC + copilot labels, issue, and planning-agent assignment ──
       setProgress('Creating SDLC label…');
       await ghFetch(`/repos/${full}/labels`, token, {
         method: 'POST',
         body: { name: 'SDLC', color: '0075ca', description: 'Triggers the SDLC Greenfield Planning agentic workflow' },
       });
+
+      // copilot label — triggers the GitHub Copilot coding agent (planning agent)
+      // when applied to an issue; create it if it doesn't already exist.
+      const copilotLabelCheck = await ghFetch(`/repos/${full}/labels/copilot`, token);
+      if (!copilotLabelCheck.ok) {
+        await ghFetch(`/repos/${full}/labels`, token, {
+          method: 'POST',
+          body: { name: 'copilot', color: '1d76db', description: 'Assign to GitHub Copilot coding agent' },
+        });
+      }
 
       setProgress('Creating project summary issue…');
       const issueBody = buildIssueBody(wizardData, projectName || repoName.trim(), { repoDesc: repoDesc.trim() });
@@ -1160,12 +1164,20 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
         body: {
           title:  `Project: ${projectName || repoName.trim()}`,
           body:   issueBody,
-          labels: ['SDLC'],
+          labels: ['SDLC', 'copilot'],
         },
       });
       if (issueRes.ok) {
         const issue = await issueRes.json();
         setIssueUrl(issue.html_url);
+
+        // Assign copilot as the issue assignee to trigger the planning agent.
+        // Non-fatal: copilot coding agent may not be enabled for this repo yet;
+        // the 'copilot' label alone will still trigger it once enabled.
+        await ghFetch(`/repos/${full}/issues/${issue.number}`, token, {
+          method: 'PATCH',
+          body: { assignees: ['copilot'] },
+        });
       }
 
       setRepoUrl(repo.html_url);
