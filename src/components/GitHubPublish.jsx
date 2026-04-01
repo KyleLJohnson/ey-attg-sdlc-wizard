@@ -40,32 +40,54 @@ function parseRepo(input) {
   return null;
 }
 
+function isAlwaysSharedPath(path) {
+  return path.startsWith('.github/agents/') || path.startsWith('.github/workflows/');
+}
+
 function scoreRoleFromRepoName(repoName) {
   const slug = (repoName || '').split('/').pop().toLowerCase();
   const frontendHints = ['frontend', 'fe-', '-fe', '.fe', 'ui', 'web', 'client',
     'react', 'angular', 'next', 'portal', 'spa'];
-  const backendHints = ['backend', 'api', 'be-', '-be', '.be', 'server', 'service',
-    'services', 'aspnet', 'spring', 'nest', 'python', 'worker'];
+  const apiHints = ['api', 'server', 'service', 'services', 'rest', 'http', 'webapi',
+    'worker', 'function', 'functions'];
+  const backendLibraryHints = ['library', 'lib', 'shared', 'common', 'core', 'domain',
+    'contracts', 'abstractions', 'sdk'];
   return {
     frontend: frontendHints.reduce((n, hint) => n + (slug.includes(hint) ? 1 : 0), 0),
-    backend: backendHints.reduce((n, hint) => n + (slug.includes(hint) ? 1 : 0), 0),
+    api: apiHints.reduce((n, hint) => n + (slug.includes(hint) ? 1 : 0), 0),
+    backendLibrary: backendLibraryHints.reduce((n, hint) => n + (slug.includes(hint) ? 1 : 0), 0),
   };
 }
 
 function scoreRoleFromPaths(existingPaths) {
   const indicators = {
     frontend: [
-      /^src\//i, /^public\//i, /^pages\//i, /^components\//i, /^styles\//i,
-      /^assets\//i, /^ui\//i, /^frontend\//i, /^web\//i,
+      /(^|\/)public\//i,
+      /(^|\/)pages\//i,
+      /(^|\/)components\//i,
+      /(^|\/)styles\//i,
+      /(^|\/)assets\//i,
+      /(^|\/)ui\//i,
+      /(^|\/)frontend\//i,
+      /(^|\/)web\//i,
+      /(^|\/)app\.(tsx|jsx|vue|svelte)$/i,
       /(^|\/)next\.config\.(js|mjs|ts)$/i,
       /(^|\/)vite\.config\.(js|mjs|ts)$/i,
       /(^|\/)angular\.json$/i,
-      /(^|\/)tsconfig\.json$/i,
-      /(^|\/)package\.json$/i,
     ],
-    backend: [
-      /^api\//i, /^server\//i, /^backend\//i, /^services?\//i, /^controllers?\//i,
-      /^routes?\//i, /^handlers?\//i, /^migrations?\//i, /^alembic\//i,
+    api: [
+      /(^|\/)api\//i,
+      /(^|\/)server\//i,
+      /(^|\/)services?\//i,
+      /(^|\/)controllers?\//i,
+      /(^|\/)routes?\//i,
+      /(^|\/)handlers?\//i,
+      /(^|\/)migrations?\//i,
+      /(^|\/)alembic\//i,
+      /(^|\/)swagger\//i,
+      /(^|\/)openapi\//i,
+      /(^|\/)appsettings\.[^.]+$/i,
+      /(^|\/)program\.cs$/i,
       /(^|\/)requirements\.txt$/i,
       /(^|\/)pyproject\.toml$/i,
       /(^|\/)pom\.xml$/i,
@@ -73,17 +95,31 @@ function scoreRoleFromPaths(existingPaths) {
       /(^|\/)Cargo\.toml$/i,
       /(^|\/)go\.mod$/i,
       /(^|\/)Dockerfile$/i,
+    ],
+    backendLibrary: [
+      /(^|\/)lib\//i,
+      /(^|\/)shared\//i,
+      /(^|\/)common\//i,
+      /(^|\/)core\//i,
+      /(^|\/)domain\//i,
+      /(^|\/)contracts?\//i,
+      /(^|\/)abstractions?\//i,
+      /(^|\/)sdk\//i,
+      /(^|\/)Directory\.Build\.(props|targets)$/i,
+      /(^|\/)global\.json$/i,
       /\.csproj$/i,
     ],
   };
 
   let frontend = 0;
-  let backend = 0;
+  let api = 0;
+  let backendLibrary = 0;
   for (const path of existingPaths) {
     if (indicators.frontend.some(rx => rx.test(path))) frontend++;
-    if (indicators.backend.some(rx => rx.test(path))) backend++;
+    if (indicators.api.some(rx => rx.test(path))) api++;
+    if (indicators.backendLibrary.some(rx => rx.test(path))) backendLibrary++;
   }
-  return { frontend, backend };
+  return { frontend, api, backendLibrary };
 }
 
 async function fetchExistingBlobPaths(repoName, baseTreeSha, token) {
@@ -145,31 +181,33 @@ const FILE_ROLE = {
   '.github/instructions/motif-design-system.instructions.md':       'frontend',
   '.github/instructions/nextjs.instructions.md':                    'frontend',
   '.github/instructions/reactjs.instructions.md':                   'frontend',
-  // Backend-only
-  '.github/instructions/aspnet-rest-apis.instructions.md':                       'backend',
-  '.github/instructions/containerization-docker-best-practices.instructions.md': 'backend',
-  '.github/instructions/kubernetes-deployment-best-practices.instructions.md':   'backend',
-  '.github/instructions/nestjs.instructions.md':                                 'backend',
-  '.github/instructions/python.instructions.md':                                 'backend',
-  '.github/instructions/springboot.instructions.md':                             'backend',
-  '.github/instructions/swagger-api-docs.instructions.md':                       'backend',
+  // API/service-only
+  '.github/instructions/aspnet-rest-apis.instructions.md':                       'api',
+  '.github/instructions/containerization-docker-best-practices.instructions.md': 'api',
+  '.github/instructions/kubernetes-deployment-best-practices.instructions.md':   'api',
+  '.github/instructions/nestjs.instructions.md':                                 'api',
+  '.github/instructions/python.instructions.md':                                 'api',
+  '.github/instructions/springboot.instructions.md':                             'api',
+  '.github/instructions/swagger-api-docs.instructions.md':                       'api',
 };
 
 /**
- * Infer whether a repo is frontend, backend, or fullstack from its name.
+ * Infer whether a repo is frontend, api, backend-library, or fullstack from its name and contents.
  * repoName is 'owner/repo' — we look at the repo slug only.
  */
 function classifyRepoRole(repoName, existingPaths = new Set()) {
   const nameScore = scoreRoleFromRepoName(repoName);
   const pathScore = scoreRoleFromPaths(existingPaths);
   const frontendScore = nameScore.frontend + pathScore.frontend;
-  const backendScore = nameScore.backend + pathScore.backend;
+  const apiScore = nameScore.api + pathScore.api;
+  const backendLibraryScore = nameScore.backendLibrary + pathScore.backendLibrary;
 
-  // Prefer fullstack unless one side has a meaningful lead.
-  const delta = Math.abs(frontendScore - backendScore);
-  if (frontendScore > 0 && backendScore > 0 && delta < 2) return 'fullstack';
-  if (frontendScore >= backendScore + 2) return 'frontend';
-  if (backendScore >= frontendScore + 2) return 'backend';
+  if (frontendScore > 0 && apiScore > 0 && Math.abs(frontendScore - apiScore) < 2) return 'fullstack';
+  if (frontendScore >= apiScore + 2 && frontendScore >= backendLibraryScore + 2) return 'frontend';
+  if (apiScore >= frontendScore + 2 && apiScore >= backendLibraryScore + 1) return 'api';
+  if (backendLibraryScore > 0 && apiScore === 0 && frontendScore === 0) return 'backend-library';
+  if (backendLibraryScore >= frontendScore + 2 && backendLibraryScore >= apiScore + 1) return 'backend-library';
+
   return 'fullstack';
 }
 
@@ -437,6 +475,11 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
   function applyAiRouting(allFiles, routingMap, repoIndex) {
     const result = {};
     for (const [path, content] of Object.entries(allFiles)) {
+      if (isAlwaysSharedPath(path)) {
+        result[path] = content;
+        continue;
+      }
+
       const mapped = routingMap[path];
       if (mapped === undefined) {
         // Not in map — Option A sends everything, so include it
