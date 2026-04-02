@@ -370,6 +370,148 @@ function buildIssueBody(wizardData, projectName, { repoDesc = '', targetRepos = 
   return lines.join('\n');
 }
 
+// ── Build LLM prompt with full wizard context for per-repo analysis ───────────
+function buildAnalysisPrompt(wizardData, targetRepos) {
+  const p   = wizardData?.project      || {};
+  const ts  = wizardData?.techStack    || {};
+  const gov = wizardData?.governance   || {};
+  const con = wizardData?.constitution || {};
+  const ag  = wizardData?.agent        || {};
+  const mc  = wizardData?.mcp          || {};
+  const lines = [];
+
+  lines.push(
+    'You are a software architect reviewing an onboarding request for existing repositories.',
+    'The engineering team is adopting the SpecDD methodology. Your task: for each target repository,',
+    'identify the specific changes and additions needed given the project context below.',
+    '',
+    '## Project',
+  );
+  if (p.name)             lines.push(`Name: ${p.name}`);
+  if (p.description)      lines.push(`Description: ${p.description}`);
+  if (p.problemStatement) lines.push(`Problem Statement: ${p.problemStatement}`);
+  if (p.userOutcome)      lines.push(`User Outcome: ${p.userOutcome}`);
+  if (p.businessOutcome)  lines.push(`Business Outcome: ${p.businessOutcome}`);
+
+  lines.push('', '## Tech Stack');
+  if (ts.languages?.length) lines.push(`Languages: ${ts.languages.join(', ')}`);
+  if (ts.frontend && ts.frontend !== 'none') {
+    const fe = ts.frontendOther ? `${ts.frontend} (${ts.frontendOther})` : ts.frontend;
+    lines.push(`Frontend: ${fe}`);
+  }
+  if (ts.backend && ts.backend !== 'none') {
+    const be = ts.backendOther ? `${ts.backend} (${ts.backendOther})` : ts.backend;
+    lines.push(`Backend: ${be}`);
+  }
+  if (ts.database && ts.database !== 'none') lines.push(`Database: ${ts.database}`);
+  const infra = (ts.infrastructure || []).filter(i => i !== 'none');
+  if (infra.length) lines.push(`Infrastructure: ${infra.join(', ')}`);
+  if (ts.testing?.length)          lines.push(`Testing: ${ts.testing.join(', ')}`);
+  if (ts.devops?.length)           lines.push(`DevOps: ${ts.devops.join(', ')}`);
+  if (ts.identityPlatform?.length) lines.push(`Identity: ${ts.identityPlatform.join(', ')}`);
+  const extras = [
+    ts.useSwagger && 'OpenAPI/Swagger',
+    ts.useMotif   && 'EY Motif Design System',
+    ts.useA11y    && 'WCAG AA Accessibility',
+  ].filter(Boolean);
+  if (extras.length) lines.push(`Extras: ${extras.join(', ')}`);
+
+  const govLevels = gov.levels || [];
+  if (govLevels.length || gov.buName || gov.domainName) {
+    lines.push('', '## Governance');
+    if (govLevels.length) {
+      const levelLabels = { product: 'L1 Product', enterprise: 'L0 Enterprise', bu: 'L2 Business Unit', domain: 'L3 Domain' };
+      lines.push(`Levels: ${govLevels.map(l => levelLabels[l] || l).join(', ')}`);
+    }
+    if (gov.buName)     lines.push(`Business Unit: ${gov.buName}`);
+    if (gov.domainName) lines.push(`Domain: ${gov.domainName}`);
+  }
+
+  const hasPrinciples = con.architectureStyle || con.security?.length ||
+    con.codeQuality || con.performance ||
+    (con.testCoverage !== undefined && con.testCoverage !== '') || con.additionalRules;
+  if (hasPrinciples) {
+    lines.push('', '## Architecture & Principles');
+    if (con.architectureStyle) lines.push(`Architecture Style: ${con.architectureStyle}`);
+    if (con.security?.length)  lines.push(`Security Standards: ${con.security.join(', ')}`);
+    if (con.testCoverage !== undefined && con.testCoverage !== '') {
+      lines.push(`Test Coverage Target: ${con.testCoverage}%`);
+    }
+    if (con.codeQuality)     lines.push(`Code Quality: ${con.codeQuality}`);
+    if (con.performance)     lines.push(`Performance Target: ${con.performance}`);
+    if (con.additionalRules) lines.push(`Additional Rules: ${con.additionalRules}`);
+  }
+
+  if (ag.primary || ag.model || mc.tools?.length) {
+    lines.push('', '## Agent & LLM');
+    if (ag.primary)       lines.push(`Primary Agent: ${ag.primary}`);
+    if (ag.model)         lines.push(`Model: ${ag.model}`);
+    if (mc.tools?.length) lines.push(`MCP Tools: ${mc.tools.join(', ')}`);
+  }
+
+  lines.push(
+    '',
+    '## Target Repositories',
+    ...targetRepos.map((r, i) => `${i + 1}. ${r}`),
+    '',
+    '## Your Task',
+    'For each repository listed above, determine what specific changes or additions are needed.',
+    'Consider the tech role of each repo (frontend, API, shared library), governance requirements,',
+    'security standards, CI/CD setup, MCP tool configuration, and agent instruction files.',
+    '',
+    'Respond ONLY with a valid JSON object — one key per repository using the exact "owner/repo" string:',
+    '{',
+    '  "owner/repo": {',
+    '    "summary": "One sentence describing the primary goal for this repository",',
+    '    "changes": ["Specific actionable change or addition required", "..."],',
+    '    "rationale": "Brief explanation of why these changes matter for this repository"',
+    '  }',
+    '}',
+    '',
+    'Return only the JSON object. Do not include any text outside it.',
+  );
+
+  return lines.join('\n');
+}
+
+// ── Build issue body from LLM analysis (falls back to full wizard dump) ───────
+function buildLLMIssueBody(repo, analysis, wizardData, projectName, targetRepos) {
+  if (!analysis) {
+    return buildIssueBody(wizardData, projectName, { targetRepos });
+  }
+
+  const lines = [];
+  lines.push(`## ${projectName} — Required Changes for \`${repo}\``, '');
+
+  if (analysis.summary) {
+    lines.push('## Summary', '', analysis.summary, '');
+  }
+
+  if (Array.isArray(analysis.changes) && analysis.changes.length > 0) {
+    lines.push('## Required Changes', '');
+    for (const change of analysis.changes) {
+      lines.push(`- [ ] ${change}`);
+    }
+    lines.push('');
+  }
+
+  if (analysis.rationale) {
+    lines.push('## Rationale', '', analysis.rationale, '');
+  }
+
+  const otherRepos = targetRepos.filter(r => r !== repo);
+  if (otherRepos.length > 0) {
+    lines.push('## Related Repositories', '');
+    for (const r of otherRepos) {
+      lines.push(`- ${r}`);
+    }
+    lines.push('');
+  }
+
+  lines.push('---', '*Generated by the EY ATTG SDLC Wizard.*');
+  return lines.join('\n');
+}
+
 function ghFetch(path, token, opts = {}) {
   return fetch(`${GITHUB_API}${path}`, {
     ...opts,
@@ -402,7 +544,7 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
   const [progress, setProgress]     = useState('');
   const [repoUrl, setRepoUrl]       = useState('');
   const [prUrls, setPrUrls]         = useState([]);
-  const [issueUrl, setIssueUrl]     = useState('');
+  const [issueUrls, setIssueUrls]   = useState([]);
   const [error, setError]           = useState('');
 
   const fileCount = files ? Object.keys(files).length : 0;
@@ -500,6 +642,46 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
     return result;
   }
 
+  // ── LLM analysis of brownfield repos — produces per-repo change plan ─────
+  async function analyzeBrownfieldWithLLM(wxData, repos) {
+    try {
+      const prompt = buildAnalysisPrompt(wxData, repos);
+      const res = await fetch('https://models.inference.ai.azure.com/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: 8192,
+          temperature: 0,
+        }),
+      });
+
+      if (!res.ok) return null;
+      const data = await res.json();
+      const raw = data?.choices?.[0]?.message?.content?.trim();
+      if (!raw) return null;
+
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) return null;
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+
+      const map = new Map();
+      for (const [repo, analysis] of Object.entries(parsed)) {
+        if (analysis && typeof analysis === 'object' && !Array.isArray(analysis)) {
+          map.set(repo, analysis);
+        }
+      }
+      return map.size > 0 ? map : null;
+    } catch {
+      return null;
+    }
+  }
+
   // ── Verify PAT + fetch user ───────────────────────────────────────────────
   async function connectWithPat() {
     const trimmed = pat.trim();
@@ -546,6 +728,57 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
       setProgress('Analyzing feature spec for smart repo routing…');
       aiRoutingMap = await getAiRoutingMap(files, targetRepos, featureSpec);
     }
+
+    // ── LLM analysis: generate per-repo change plan ──────────────────────
+    setProgress('Analyzing repositories with AI…');
+    const analysisMap = await analyzeBrownfieldWithLLM(wizardData, targetRepos);
+
+    // ── Per-repo issue creation (before PRs, best-effort per repo) ────────
+    setProgress('Creating repository issues…');
+    const collectedIssueUrls = [];
+    for (const repo of targetRepos) {
+      try {
+        const labelCheck = await ghFetch(`/repos/${repo}/labels/copilot`, token);
+        if (!labelCheck.ok) {
+          await ghFetch(`/repos/${repo}/labels`, token, {
+            method: 'POST',
+            body: { name: 'copilot', color: '1d76db', description: 'Assign to GitHub Copilot coding agent' },
+          });
+        }
+
+        setProgress(`Creating issue for ${repo}…`);
+        const issueBody = buildLLMIssueBody(
+          repo,
+          analysisMap ? (analysisMap.get(repo) ?? null) : null,
+          wizardData,
+          projectName || repo,
+          targetRepos,
+        );
+        const issueRes = await ghFetch(`/repos/${repo}/issues`, token, {
+          method: 'POST',
+          body: {
+            title: `Project: ${projectName || repo}`,
+            body: issueBody,
+            labels: ['copilot'],
+          },
+        });
+        if (issueRes.ok) {
+          const issue = await issueRes.json();
+          collectedIssueUrls.push(issue.html_url);
+          // Assign copilot as the issue assignee to trigger the planning agent.
+          // Non-fatal: copilot coding agent may not be enabled for this repo yet.
+          await ghFetch(`/repos/${repo}/issues/${issue.number}`, token, {
+            method: 'PATCH',
+            body: { assignees: ['copilot'] },
+          });
+        } else {
+          collectedIssueUrls.push(null);
+        }
+      } catch {
+        collectedIssueUrls.push(null); // issue creation is best-effort
+      }
+    }
+    setIssueUrls(collectedIssueUrls);
 
     try {
       for (let repoIndex = 0; repoIndex < targetRepos.length; repoIndex++) {
@@ -790,47 +1023,6 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
       }
 
       setPrUrls(collectedPrUrls);
-
-      // Create copilot label, issue, and planning-agent assignment on Repo 1 only
-      setProgress('Creating issue…');
-      try {
-        const primaryRepo = targetRepos[0];
-
-        // copilot label — triggers the GitHub Copilot coding agent (planning agent)
-        // when applied to an issue; create it if it doesn't already exist.
-        const copilotLabelCheck = await ghFetch(`/repos/${primaryRepo}/labels/copilot`, token);
-        if (!copilotLabelCheck.ok) {
-          await ghFetch(`/repos/${primaryRepo}/labels`, token, {
-            method: 'POST',
-            body: { name: 'copilot', color: '1d76db', description: 'Assign to GitHub Copilot coding agent' },
-          });
-        }
-
-        const issueBody = buildIssueBody(wizardData, projectName || primaryRepo, { targetRepos });
-        const issueRes = await ghFetch(`/repos/${primaryRepo}/issues`, token, {
-          method: 'POST',
-          body: {
-            title: `Project: ${projectName || primaryRepo}`,
-            body: issueBody,
-            labels: ['copilot'],
-          },
-        });
-        if (issueRes.ok) {
-          const issue = await issueRes.json();
-          setIssueUrl(issue.html_url);
-
-          // Assign copilot as the issue assignee to trigger the planning agent.
-          // Non-fatal: copilot coding agent may not be enabled for this repo yet;
-          // the 'copilot' label alone will still trigger it once enabled.
-          await ghFetch(`/repos/${primaryRepo}/issues/${issue.number}`, token, {
-            method: 'PATCH',
-            body: { assignees: ['copilot'] },
-          });
-        }
-      } catch {
-        // Issue creation is best-effort; don't block success
-      }
-
       setPhase('done');
     } catch (err) {
       setError(err.message || 'PR creation failed. Please try again.');
@@ -1055,7 +1247,7 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
       });
       if (issueRes.ok) {
         const issue = await issueRes.json();
-        setIssueUrl(issue.html_url);
+        setIssueUrls([issue.html_url]);
 
         // Assign copilot as the issue assignee to trigger the planning agent.
         // Non-fatal: copilot coding agent may not be enabled for this repo yet;
@@ -1111,12 +1303,16 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
                     Open PR{targetRepos.length > 1 ? ` (${repo})` : ''} →
                   </a>
             ))}
-            {issueUrl && (
-              <a href={issueUrl} target="_blank" rel="noopener noreferrer"
-                className="btn btn-secondary" style={{ display: 'inline-flex', gap: 8 }}>
-                View SDLC issue →
-              </a>
-            )}
+            {issueUrls.map((url, i) => (
+              url ? (
+                <a key={url} href={url} target="_blank" rel="noopener noreferrer"
+                  className="btn btn-secondary" style={{ display: 'inline-flex', gap: 8 }}>
+                  {issueUrls.filter(Boolean).length > 1
+                    ? `View issue (${targetRepos[i] || `repo ${i + 1}`}) →`
+                    : 'View SDLC issue →'}
+                </a>
+              ) : null
+            ))}
           </div>
           {error && <div className="gh-error" style={{ marginBottom: 16 }}>{error}</div>}
           <div className="next-steps">
@@ -1152,9 +1348,9 @@ export default function GitHubPublish({ files, projectName, mode = 'greenfield',
             <GHIcon />
             Open {shortName} →
           </a>
-          {issueUrl && (
+          {issueUrls[0] && (
             <a
-              href={issueUrl}
+              href={issueUrls[0]}
               target="_blank"
               rel="noopener noreferrer"
               className="btn btn-secondary"
