@@ -381,9 +381,10 @@ function buildAnalysisPrompt(wizardData, targetRepos) {
   const lines = [];
 
   lines.push(
-    'You are a software architect reviewing an onboarding request for existing repositories.',
-    'The engineering team is adopting the SpecDD methodology. Your task: for each target repository,',
-    'identify the specific changes and additions needed given the project context below.',
+    'You are a senior software architect reviewing a feature request for a set of existing repositories.',
+    'Your primary task: use the Feature Specification below to determine exactly what code changes are',
+    'needed in each target repository. Be specific — name files, components, endpoints, or data models',
+    'where relevant. Do not give generic advice; derive concrete changes from the feature spec.',
     '',
     '## Project',
   );
@@ -392,6 +393,25 @@ function buildAnalysisPrompt(wizardData, targetRepos) {
   if (p.problemStatement) lines.push(`Problem Statement: ${p.problemStatement}`);
   if (p.userOutcome)      lines.push(`User Outcome: ${p.userOutcome}`);
   if (p.businessOutcome)  lines.push(`Business Outcome: ${p.businessOutcome}`);
+
+  // Feature specification — this is the primary driver of per-repo changes
+  const specContent = p.featureSpecContent?.trim();
+  const specUrl     = p.featureSpecUrl?.trim();
+  if (specContent || specUrl) {
+    lines.push('', '## Feature Specification');
+    if (p.featureSpecMode === 'ado' && specUrl) {
+      lines.push(`ADO Work Item: ${specUrl}`);
+    } else if (p.featureSpecMode === 'file' && p.featureSpecFileName) {
+      lines.push(`Source File: ${p.featureSpecFileName}`);
+    }
+    if (specContent) {
+      // Truncate at 6000 chars to stay within token budget; full spec is in the repo
+      const body = specContent.length > 6000
+        ? specContent.slice(0, 6000) + '\n[truncated]'
+        : specContent;
+      lines.push('', body);
+    }
+  }
 
   lines.push('', '## Tech Stack');
   if (ts.languages?.length) lines.push(`Languages: ${ts.languages.join(', ')}`);
@@ -455,9 +475,14 @@ function buildAnalysisPrompt(wizardData, targetRepos) {
     ...targetRepos.map((r, i) => `${i + 1}. ${r}`),
     '',
     '## Your Task',
-    'For each repository listed above, determine what specific changes or additions are needed.',
-    'Consider the tech role of each repo (frontend, API, shared library), governance requirements,',
-    'security standards, CI/CD setup, MCP tool configuration, and agent instruction files.',
+    'Using the Feature Specification as your primary input, determine what specific code changes',
+    'are required in each repository. Distribute the work appropriately:',
+    '- Frontend repos: UI component changes, new pages, state management, API calls',
+    '- API/backend repos: new endpoints, business logic, data models, validation',
+    '- Shared library repos: shared types, utilities, contracts that multiple repos depend on',
+    '',
+    'If no Feature Specification was provided, focus instead on SpecDD methodology onboarding:',
+    'governance setup, CI/CD configuration, agent instruction files, and code quality standards.',
     '',
     'Respond ONLY with a valid JSON object — one key per repository using the exact "owner/repo" string:',
     '{',
